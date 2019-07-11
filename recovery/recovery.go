@@ -1,7 +1,7 @@
 // -*- Mode: Go; indent-tabs-mode: t -*-
 
 /*
- * Copyright (C) 2016-2017 Canonical Ltd
+ * Copyright (C) 2019 Canonical Ltd
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 3 as
@@ -47,7 +47,7 @@ func Recover(version string) error {
 	if GetKernelParameter("snap_mode") == "recover_reboot" {
 
 		mntSysRecover := "/mnt/sys-recover"
-		if err := mountFilesystem("sys-recover", mntSysRecover); err != nil {
+		if err := mountFilesystem("ubuntu-seed", mntSysRecover); err != nil {
 			return err
 		}
 		// update recovery mode
@@ -72,7 +72,7 @@ func Recover(version string) error {
 
 	mntRecovery := "/mnt/recovery"
 
-	if err := mountFilesystem("writable", mntRecovery); err != nil {
+	if err := mountFilesystem("ubuntu-data", mntRecovery); err != nil {
 		return err
 	}
 
@@ -144,7 +144,7 @@ func Install(version string) error {
 
 	keyfile := path.Join(mntSystemBoot, "keyfile")
 
-	if err := mountFilesystem("system-boot", mntSystemBoot); err != nil {
+	if err := mountFilesystem("ubuntu-boot", mntSystemBoot); err != nil {
 		return err
 	}
 
@@ -164,7 +164,7 @@ func Install(version string) error {
 		return err
 	}
 
-	if err := mountFilesystem("sys-recover", mntSysRecover); err != nil {
+	if err := mountFilesystem("ubuntu-seed", mntSysRecover); err != nil {
 		return err
 	}
 
@@ -199,14 +199,14 @@ func Install(version string) error {
 func createWritable(keyfile string, keyfileSize int, cryptdev string) error {
 	logger.Noticef("Creating new writable")
 	disk := &DiskDevice{}
-	if err := disk.FindFromPartLabel("system-boot"); err != nil {
+	if err := disk.FindFromPartLabel("ubuntu-boot"); err != nil {
 		return fmt.Errorf("cannot determine boot device: %s", err)
 	}
 
 	// FIXME: get values from gadget, system
-	err := disk.CreateLUKSPartition(1000*sizeMB, "writable", keyfile, keyfileSize, cryptdev)
+	err := disk.CreateLUKSPartition(1000*sizeMB, "ubuntu-data", keyfile, keyfileSize, cryptdev)
 	if err != nil {
-		return fmt.Errorf("cannot create new writable: %s", err)
+		return fmt.Errorf("cannot create new ubuntu-data: %s", err)
 	}
 
 	return nil
@@ -240,46 +240,46 @@ func updateRecovery(mntWritable, mntSysRecover, mntSystemBoot, version string) (
 
 	// needed as mount-point (and for snapd.core-fixup.services)
 	if err = os.MkdirAll(path.Join(mntWritable, "system-data/boot"), 0755); err != nil {
-		return
+		return "", "", err
 	}
 
 	// remove all previous content of seed and snaps (if any)
 	// this allow us to call this function to update our recovery version
 	if err = os.RemoveAll(dest); err != nil {
-		return
+		return "", "", err
 	}
 	if err = os.RemoveAll(path.Join(mntWritable, snapPath)); err != nil {
-		return
+		return "", "", err
 	}
 
 	dirs := []string{seedPath, snapPath, "user-data"}
 	if err = mkdirs(mntWritable, dirs, 0755); err != nil {
-		return
+		return "", "", err
 	}
 
 	// cp -a $srcSnaps/*, $dest+"/snaps"
 	srcSnapFiles, err := ioutil.ReadDir(srcSnaps)
 	if err != nil {
-		return
+		return "", "", err
 	}
 	err = os.MkdirAll(dest+"/snaps", 0755)
 	if err != nil {
-		return
+		return "", "", err
 	}
 	for _, f := range srcSnapFiles {
 		if err = copyTree(path.Join(srcSnaps, f.Name()), dest+"/snaps"); err != nil {
-			return
+			return "", "", err
 		}
 	}
 
 	// cp -a $srcRecoverySystem $dest
 	seedFiles, err := ioutil.ReadDir(srcRecoverySystem)
 	if err != nil {
-		return
+		return "", "", err
 	}
 	for _, f := range seedFiles {
 		if err = copyTree(path.Join(srcRecoverySystem, f.Name()), dest); err != nil {
-			return
+			return "", "", err
 		}
 	}
 
@@ -294,18 +294,18 @@ func updateRecovery(mntWritable, mntSysRecover, mntSystemBoot, version string) (
 	coreSnapPath := path.Join(mntWritable, snapPath, core)
 	err = os.Symlink(path.Join("../seed/snaps", core), coreSnapPath)
 	if err != nil {
-		return
+		return "", "", err
 	}
 
 	kernelSnapPath := path.Join(mntWritable, snapPath, kernel)
 	err = os.Symlink(path.Join("../seed/snaps", kernel), kernelSnapPath)
 	if err != nil {
-		return
+		return "", "", err
 	}
 
 	err = extractKernel(kernelSnapPath, mntSystemBoot)
 
-	return
+	return core, kernel, err
 }
 
 func extractKernel(kernelPath, mntSystemBoot string) error {
@@ -393,5 +393,4 @@ func Restart() error {
 
 	// look away
 	select {}
-	return nil
 }
