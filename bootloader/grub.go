@@ -92,11 +92,8 @@ func (g *grub) SetBootVars(values map[string]string) error {
 }
 
 func (g *grub) ExtractKernelAssets(s snap.PlaceInfo, snapf snap.Container) error {
-	// XXX: should we use "kernel.yaml" for this?
-	if _, err := snapf.ReadFile("meta/force-kernel-extraction"); err == nil {
-		return extractKernelAssetsToBootDir(g.dir(), s, snapf)
-	}
-	return nil
+	targetdir := filepath.Join(g.rootdir, "/systems/20191107/")
+	return extractKernelAssetsToBootDir(targetdir, s, snapf)
 }
 
 func (g *grub) RemoveKernelAssets(s snap.PlaceInfo) error {

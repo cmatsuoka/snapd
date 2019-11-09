@@ -151,8 +151,9 @@ func ForceError(err error) {
 
 func extractKernelAssetsToBootDir(bootDir string, s snap.PlaceInfo, snapf snap.Container) error {
 	// now do the kernel specific bits
-	blobName := filepath.Base(s.MountFile())
-	dstDir := filepath.Join(bootDir, blobName)
+	//blobName := filepath.Base(s.MountFile())
+	//dstDir := filepath.Join(bootDir, blobName)
+	dstDir := bootDir
 	if err := os.MkdirAll(dstDir, 0755); err != nil {
 		return err
 	}
