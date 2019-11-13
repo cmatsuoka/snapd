@@ -156,6 +156,7 @@ out:
 			break out
 		case <-d.Dying():
 			// something called Stop()
+			logger.Noticef(">>> something called Stop()")
 			break out
 		case <-checkTicker:
 			if err := sanityCheck(); err == nil {

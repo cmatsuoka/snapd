@@ -73,6 +73,8 @@ func populateStateFromSeedImpl(st *state.State, opts *populateStateFromSeedOptio
 		mode = opts.Mode
 		sysLabel = opts.Label
 	}
+	// XXX: hack to keep core20 seeding going
+	sysLabel = "20191113"
 	// check that the state is empty
 	var seeded bool
 	err := st.Get("seeded", &seeded)

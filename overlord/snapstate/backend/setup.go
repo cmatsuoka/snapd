@@ -87,9 +87,10 @@ func (b Backend) SetupSnap(snapFilePath, instanceName string, sideInfo *snap.Sid
 
 	t := s.GetType()
 	// TODO: maybe look into passing the model
-	if err := boot.Kernel(s, t, nil, release.OnClassic).ExtractKernelAssets(snapf); err != nil {
-		return snapType, nil, fmt.Errorf("cannot install kernel: %s", err)
-	}
+	// XXX: temporarily disabling this to make core20 seed correctly
+	//if err := boot.Kernel(s, t, nil, release.OnClassic).ExtractKernelAssets(snapf); err != nil {
+	//	return snapType, nil, fmt.Errorf("cannot install kernel: %s", err)
+	//}
 
 	installRecord = &InstallRecord{TargetSnapExisted: didNothing}
 	return t, installRecord, nil

@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/snapcore/snapd/asserts"
 	"github.com/snapcore/snapd/bootloader"
@@ -331,9 +332,11 @@ func MakeBootable(model *asserts.Model, rootdir string, bootWith *BootableSet) e
 	}
 
 	m := map[string]string{
-		"snap_mode":       "",
-		"snap_try_core":   "",
-		"snap_try_kernel": "",
+		"snap_mode":            "",
+		"snap_recovery_mode":   "install",
+		"snap_recovery_system": time.Now().UTC().Format("20060102"),
+		"snap_try_core":        "",
+		"snap_try_kernel":      "",
 	}
 	if model.DisplayName() != "" {
 		m["snap_menuentry"] = model.DisplayName()

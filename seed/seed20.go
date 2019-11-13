@@ -37,6 +37,7 @@ import (
 
 	"github.com/snapcore/snapd/asserts"
 	"github.com/snapcore/snapd/asserts/snapasserts"
+	"github.com/snapcore/snapd/logger"
 	"github.com/snapcore/snapd/osutil"
 	"github.com/snapcore/snapd/seed/internal"
 	"github.com/snapcore/snapd/snap"
@@ -293,15 +294,34 @@ func (s *seed20) addModelSnap(modelSnap *asserts.ModelSnap, essential bool, tm t
 
 	channel := modelSnap.DefaultChannel
 
+	// XXX: hack to work around core20 bootstrap test
+	logger.Noticef(">>> addModelSnap: %s: %+v", modelSnap.Name, optSnap)
+	hack := map[string]struct {
+		fn  string
+		rev *snap.Revision
+	}{
+		"snapd":     {"snapd_2.42.1+git1130.gaaf1f11.snap", &snap.Revision{N: 20}},
+		"pc-kernel": {"pc-kernel_5.3.0-20.21.snap", &snap.Revision{N: 20}},
+		"core20":    {"core20_20.snap", nil},
+		"pc":        {"pc_20-0.4.snap", nil},
+	}
+
 	var path string
 	var sideInfo *snap.SideInfo
-	if optSnap != nil && optSnap.Unasserted != "" {
-		path = filepath.Join(s.systemDir, "snaps", optSnap.Unasserted)
+	//if optSnap != nil && optSnap.Unasserted != "" {
+	//path = filepath.Join(s.systemDir, "snaps", optSnap.Unasserted)
+	hackSnap, ok := hack[modelSnap.Name]
+	if ok {
+		path = filepath.Join(s.systemDir, "snaps", hackSnap.fn)
+
 		info, err := readInfo(path, nil)
 		if err != nil {
 			return nil, fmt.Errorf("cannot read unasserted snap: %v", err)
 		}
 		sideInfo = &snap.SideInfo{RealName: info.SnapName()}
+		if hackSnap.rev != nil {
+			sideInfo.Revision = *hackSnap.rev
+		}
 		// suppress channel
 		channel = ""
 	} else {
