@@ -103,7 +103,7 @@ func (dl *DeviceLayout) CreateMissing(pv *gadget.LaidOutVolume) ([]DeviceStructu
 
 	// Write the partition table, note that sfdisk will re-read the
 	// partition table by itself: see disk-utils/sfdisk.c:write_changes()
-	cmd := exec.Command("sfdisk", dl.Device)
+	cmd := exec.Command("sfdisk", "--force", dl.Device)
 	cmd.Stdin = buf
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return created, osutil.OutputErr(output, err)
