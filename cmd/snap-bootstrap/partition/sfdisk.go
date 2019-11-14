@@ -30,6 +30,13 @@ import (
 	"github.com/snapcore/snapd/osutil"
 )
 
+const (
+	systemBootRole  = "system-boot"
+	systemDataRole  = "system-data"
+	ubuntuBootLabel = "ubuntu-data"
+	ubuntuDataLabel = "ubuntu-data"
+)
+
 var (
 	sectorSize gadget.Size = 512
 )
@@ -110,7 +117,16 @@ func (dl *DeviceLayout) CreateMissing(pv *gadget.LaidOutVolume) ([]DeviceStructu
 	}
 
 	// Add an extra delay to prevent reads to take place immediately
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
+
+	// Must force partition table re-read to create nodes
+	output, err := exec.Command("partx", "-u", dl.Device).CombinedOutput()
+	if err != nil {
+		return nil, osutil.OutputErr(output, err)
+	}
+
+	// Add an extra delay to prevent reads to take place immediately
+	time.Sleep(100 * time.Millisecond)
 
 	return created, nil
 }
@@ -222,7 +238,13 @@ func buildPartitionList(ptable *sfdiskPartitionTable, pv *gadget.LaidOutVolume) 
 		fmt.Fprintf(buf, "%s : start=%12d, size=%12d, type=%s, name=%q\n", node, p.StartOffset/sectorSize,
 			s.Size/sectorSize, partitionType(ptable.Label, p.Type), s.Name)
 
-		// Are roles unique so we can use it to map nodes? Should we use labels instead?
+		// Certain roles have specific labels
+		switch s.Role {
+		case systemBootRole:
+			s.Label = ubuntuBootLabel
+		case systemDataRole:
+			s.Label = ubuntuDataLabel
+		}
 		toBeCreated = append(toBeCreated, DeviceStructure{p, node})
 	}
 
