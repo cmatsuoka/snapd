@@ -112,7 +112,7 @@ func (dl *DeviceLayout) CreateMissing(pv *gadget.LaidOutVolume) ([]DeviceStructu
 	// partition table with the BLKRRPART ioctl but will fail because the
 	// kernel side rescan removes and adds partitions and we have partitions
 	// mounted (so it fails on removal). Use --no-reread to skip this attempt.
-	cmd := exec.Command("sfdisk", "--no-reread", dl.Device)
+	cmd := exec.Command("sfdisk", "--append", "--no-reread", dl.Device)
 	cmd.Stdin = buf
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return created, osutil.OutputErr(output, err)
@@ -128,7 +128,7 @@ func (dl *DeviceLayout) CreateMissing(pv *gadget.LaidOutVolume) ([]DeviceStructu
 		return nil, osutil.OutputErr(output, err)
 	}
 
-	// Make sure the devices for the partitions we created are available
+	// Make sure the devices for the partitions we created are available.
 	if err := ensureNodesExist(created, 5*time.Second); err != nil {
 		return nil, fmt.Errorf("partition not available: %v", err)
 	}
@@ -228,19 +228,11 @@ func deviceName(name string, index int) string {
 func buildPartitionList(ptable *sfdiskPartitionTable, pv *gadget.LaidOutVolume) (sfdiskInput *bytes.Buffer, toBeCreated []DeviceStructure) {
 	buf := &bytes.Buffer{}
 
-	// Write partition data in sfdisk dump format
-	fmt.Fprintf(buf, "label: %s\nlabel-id: %s\ndevice: %s\nunit: %s\nfirst-lba: %d\nlast-lba: %d\n\n",
-		ptable.Label, ptable.ID, ptable.Device, ptable.Unit, ptable.FirstLBA, ptable.LastLBA)
+	// Write partition data in named-fields format
 
 	// Keep track what partitions we already have on disk
 	seen := map[uint64]bool{}
 	for _, p := range ptable.Partitions {
-		fmt.Fprintf(buf, "%s : start=%12d, size=%12d, type=%s, uuid=%s", p.Node, p.Start,
-			p.Size, p.Type, p.UUID)
-		if p.Name != "" {
-			fmt.Fprintf(buf, ", name=%q", p.Name)
-		}
-		fmt.Fprintf(buf, "\n")
 		seen[p.Start] = true
 	}
 
