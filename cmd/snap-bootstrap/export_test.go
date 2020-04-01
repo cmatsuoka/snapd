@@ -23,6 +23,8 @@ import (
 	"io"
 	"time"
 
+	"github.com/snapcore/secboot"
+
 	"github.com/snapcore/snapd/cmd/snap-bootstrap/bootstrap"
 )
 
@@ -69,5 +71,21 @@ func MockDefaultMarkerFile(p string) (restore func()) {
 	defaultMarkerFile = p
 	return func() {
 		defaultMarkerFile = old
+	}
+}
+
+func MockSecbootConnectToDefaultTPM(f func() (*secboot.TPMConnection, error)) (restore func()) {
+	oldSecbootConnectToDefaultTPM := secbootConnectToDefaultTPM
+	secbootConnectToDefaultTPM = f
+	return func() {
+		secbootConnectToDefaultTPM = oldSecbootConnectToDefaultTPM
+	}
+}
+
+func MockSecbootFetchAndSaveEKCertificateChain(f func(*secboot.TPMConnection, bool, string) error) (restore func()) {
+	oldSecbootFetchAndSaveEKCertificateChain := secbootFetchAndSaveEKCertificateChain
+	secbootFetchAndSaveEKCertificateChain = f
+	return func() {
+		secbootFetchAndSaveEKCertificateChain = oldSecbootFetchAndSaveEKCertificateChain
 	}
 }
