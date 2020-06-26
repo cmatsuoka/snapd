@@ -56,7 +56,7 @@ func createMissingPartitions(dl *gadget.OnDiskVolume, pv *gadget.LaidOutVolume) 
 	}
 
 	// Re-read the partition table
-	if err := reloadPartitionTable(dl.Device); err != nil {
+	if err := internal.ReloadPartitionTable(dl.Device); err != nil {
 		return nil, err
 	}
 
@@ -70,7 +70,7 @@ func createMissingPartitions(dl *gadget.OnDiskVolume, pv *gadget.LaidOutVolume) 
 
 // removeCreatedPartitions removes partitions added during a previous install.
 func removeCreatedPartitions(dl *gadget.OnDiskVolume) error {
-	indexes := make([]string, 0, len(dl.PartitionTable.Partitions))
+	indexes := make([]string, 0, dl.PartitionTableSize())
 	for i, s := range dl.Structure {
 		if s.CreatedDuringInstall {
 			logger.Noticef("partition %s was created during previous install", s.Node)
@@ -87,24 +87,12 @@ func removeCreatedPartitions(dl *gadget.OnDiskVolume) error {
 		return osutil.OutputErr(output, err)
 	}
 
-	// Reload the partition table
-	if err := reloadPartitionTable(dl.Device); err != nil {
+	// Re-read the partition table from the device and update our partition list
+	if err := gadget.UpdatePartitionList(dl); err != nil {
 		return err
 	}
-
-	// Re-read the partition table from the device to update our partition list
-	layout, err := gadget.OnDiskVolumeFromDevice(dl.Device)
-	if err != nil {
-		return fmt.Errorf("cannot read disk layout: %v", err)
-	}
-	if dl.ID != layout.ID {
-		return fmt.Errorf("partition table IDs don't match")
-	}
-	dl.Structure = layout.Structure
-	dl.PartitionTable = layout.PartitionTable
-
 	// Ensure all created partitions were removed
-	if remaining := gadget.CreatedDuringInstall(layout); len(remaining) > 0 {
+	if remaining := gadget.CreatedDuringInstall(dl); len(remaining) > 0 {
 		return fmt.Errorf("cannot remove partitions: %s", strings.Join(remaining, ", "))
 	}
 
@@ -133,20 +121,6 @@ func ensureNodesExistImpl(dss []gadget.OnDiskStructure, timeout time.Duration) e
 		} else {
 			return fmt.Errorf("device %s not available", ds.Node)
 		}
-	}
-	return nil
-}
-
-// reloadPartitionTable instructs the kernel to re-read the partition
-// table of a given block device.
-func reloadPartitionTable(device string) error {
-	// Re-read the partition table using the BLKPG ioctl, which doesn't
-	// remove existing partitions, only appends new partitions with the right
-	// size and offset. As long as we provide consistent partitioning from
-	// userspace we're safe.
-	output, err := exec.Command("partx", "-u", device).CombinedOutput()
-	if err != nil {
-		return osutil.OutputErr(output, err)
 	}
 	return nil
 }
