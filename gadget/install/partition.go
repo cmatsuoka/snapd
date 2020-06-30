@@ -99,8 +99,6 @@ func removeCreatedPartitions(dl *gadget.OnDiskVolume) error {
 	return nil
 }
 
-var internalUdevTrigger = internal.UdevTrigger
-
 // ensureNodeExists makes sure the device nodes for all device structures are
 // available and notified to udev, within a specified amount of time.
 func ensureNodesExistImpl(dss []gadget.OnDiskStructure, timeout time.Duration) error {
@@ -115,12 +113,21 @@ func ensureNodesExistImpl(dss []gadget.OnDiskStructure, timeout time.Duration) e
 			time.Sleep(100 * time.Millisecond)
 		}
 		if found {
-			if err := internalUdevTrigger(ds.Node); err != nil {
+			if err := udevTrigger(ds.Node); err != nil {
 				return err
 			}
 		} else {
 			return fmt.Errorf("device %s not available", ds.Node)
 		}
+	}
+	return nil
+}
+
+// udevTrigger triggers udev for the specified device and waits until
+// all events in the udev queue are handled.
+func udevTrigger(device string) error {
+	if output, err := exec.Command("udevadm", "trigger", "--settle", device).CombinedOutput(); err != nil {
+		return osutil.OutputErr(output, err)
 	}
 	return nil
 }
