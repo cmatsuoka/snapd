@@ -35,6 +35,7 @@ import (
 	"github.com/snapcore/snapd/dirs"
 	"github.com/snapcore/snapd/gadget"
 	"github.com/snapcore/snapd/osutil"
+	"github.com/snapcore/snapd/secboot"
 	"github.com/snapcore/snapd/strutil"
 )
 
@@ -218,6 +219,7 @@ type TrustedAssetsInstallObserver struct {
 	trustedAssets         []string
 	trackedAssets         []*trackedAsset
 	trackedRecoveryAssets []*trackedAsset
+	encryptionKey         secboot.EncryptionKey
 }
 
 // Observe observes the operation related to the content of a given gadget
@@ -303,6 +305,14 @@ func (o *TrustedAssetsInstallObserver) currentTrustedBootAssetsMap() bootAssetsM
 
 func (o *TrustedAssetsInstallObserver) currentTrustedRecoveryBootAssetsMap() bootAssetsMap {
 	return trackedAssetsToBootMap(o.trackedRecoveryAssets)
+}
+
+func (o *TrustedAssetsInstallObserver) SetEncryptionKey(key secboot.EncryptionKey) {
+	o.encryptionKey = key
+}
+
+func (o *TrustedAssetsInstallObserver) EncryptionKey() secboot.EncryptionKey {
+	return o.encryptionKey
 }
 
 // TrustedAssetsUpdateObserverForModel returns a new trusted assets observer for

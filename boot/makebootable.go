@@ -28,6 +28,7 @@ import (
 	"github.com/snapcore/snapd/bootloader"
 	"github.com/snapcore/snapd/dirs"
 	"github.com/snapcore/snapd/osutil"
+	"github.com/snapcore/snapd/secboot"
 	"github.com/snapcore/snapd/snap"
 	"github.com/snapcore/snapd/snap/snapfile"
 )
@@ -361,6 +362,13 @@ func makeBootable20RunMode(model *asserts.Model, rootdir string, bootWith *Boota
 		}
 	}
 
+	if sealer != nil {
+		// seal the encryption key to the parameters specified in modeenv
+		if err := sealKeyToModeenv(sealer.EncryptionKey(), bl.Name(), model, modeenv); err != nil {
+			return err
+		}
+	}
+
 	// LAST step: update recovery bootloader environment to indicate that we
 	// transition to run mode now
 	opts = &bootloader.Options{
@@ -378,5 +386,62 @@ func makeBootable20RunMode(model *asserts.Model, rootdir string, bootWith *Boota
 	if err := bl.SetBootVars(blVars); err != nil {
 		return fmt.Errorf("cannot set recovery environment: %v", err)
 	}
+
 	return nil
+}
+
+func sealKeyToModeenv(key secboot.EncryptionKey, blName string, model *asserts.Model, modeenv *Modeenv) error {
+	// Build a load chain
+	recoveryPaths := bootAssetsPaths(blName, modeenv.CurrentTrustedRecoveryBootAssets)
+	runPaths := bootAssetsPaths(blName, modeenv.CurrentTrustedBootAssets)
+
+	// During install the recovery and installed kernels are the same
+	loadChain := append(recoveryPaths, runPaths...)
+	loadChain = append(loadChain, filepath.Join(InitramfsRunMntDir, "ubuntu-boot/EFI/ubuntu/kernel.efi"))
+
+	// TODO:UC20: retrieve command lines from modeenv, the format is still TBD
+	// Get the expected kernel command line for the system that is currently being installed
+	cmdline, err := ComposeCandidateCommandLine(model)
+	if err != nil {
+		return fmt.Errorf("cannot obtain kernel command line: %v", err)
+	}
+	// Get the expected kernel command line of the recovery system we're installing from
+	recoveryCmdline, err := ComposeRecoveryCommandLine(model, modeenv.RecoverySystem)
+	if err != nil {
+		return fmt.Errorf("cannot obtain recovery kernel command line: %v", err)
+	}
+	kernelCmdlines := []string{
+		cmdline,
+		recoveryCmdline,
+	}
+
+	sealKeyParams := secboot.SealKeyParams{
+		ModelParams: []*secboot.SealKeyModelParams{
+			{
+				Model:          model,
+				KernelCmdlines: kernelCmdlines,
+				EFILoadChains:  [][]string{loadChain},
+			},
+		},
+		KeyFile:                 filepath.Join(InitramfsEncryptionKeyDir, "ubuntu-data.sealed-key"),
+		TPMPolicyUpdateDataFile: filepath.Join(InstallHostFDEDataDir, "policy-update-data"),
+		TPMLockoutAuthFile:      filepath.Join(InstallHostFDEDataDir, "tpm-lockout-auth"),
+	}
+
+	if err := secboot.SealKey(key, &sealKeyParams); err != nil {
+		return fmt.Errorf("cannot seal the encryption key: %v", err)
+	}
+	return nil
+}
+
+func bootAssetsPaths(blName string, assetsMap bootAssetsMap) (paths []string) {
+	for asset, hashList := range assetsMap {
+		// for the initial sealing we have exactly one hash per asset
+		if len(hashList) < 1 {
+			continue
+		}
+		assetPath := filepath.Join(dirs.SnapBootAssetsDir, blName, fmt.Sprintf("%s-%s", asset, hashList[0]))
+		paths = append(paths, assetPath)
+	}
+	return paths
 }

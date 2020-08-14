@@ -51,7 +51,7 @@ func deviceFromRole(lv *gadget.LaidOutVolume, role string) (device string, err e
 
 // Run bootstraps the partitions of a device, by either creating
 // missing ones or recreating installed ones.
-func Run(gadgetRoot, device string, options Options, observer gadget.ContentObserver) error {
+func Run(gadgetRoot, device string, options Options, observer gadget.ContentInstallObserver) error {
 	if gadgetRoot == "" {
 		return fmt.Errorf("cannot use empty gadget root directory")
 	}
@@ -166,53 +166,7 @@ func Run(gadgetRoot, device string, options Options, observer gadget.ContentObse
 		return fmt.Errorf("cannot store recovery key: %v", err)
 	}
 
-	// TODO:UC20: binaries are EFI/bootloader-specific, hardcoded for now
-	loadChain := []string{
-		// the path to the shim EFI binary
-		filepath.Join(boot.InitramfsUbuntuSeedDir, "EFI/boot/bootx64.efi"),
-		// the path to the recovery grub EFI binary
-		filepath.Join(boot.InitramfsUbuntuSeedDir, "EFI/boot/grubx64.efi"),
-		// the path to the run mode grub EFI binary
-		filepath.Join(boot.InitramfsUbuntuBootDir, "EFI/boot/grubx64.efi"),
-	}
-	if options.KernelPath != "" {
-		// the path to the kernel EFI binary
-		loadChain = append(loadChain, options.KernelPath)
-	}
-
-	// Get the expected kernel command line for the system that is currently being installed
-	cmdline, err := boot.ComposeCandidateCommandLine(options.Model)
-	if err != nil {
-		return fmt.Errorf("cannot obtain kernel command line: %v", err)
-	}
-
-	// Get the expected kernel command line of the recovery system we're installing from
-	recoveryCmdline, err := boot.ComposeRecoveryCommandLine(options.Model, options.SystemLabel)
-	if err != nil {
-		return fmt.Errorf("cannot obtain recovery kernel command line: %v", err)
-	}
-
-	kernelCmdlines := []string{
-		cmdline,
-		recoveryCmdline,
-	}
-
-	sealKeyParams := secboot.SealKeyParams{
-		ModelParams: []*secboot.SealKeyModelParams{
-			{
-				Model:          options.Model,
-				KernelCmdlines: kernelCmdlines,
-				EFILoadChains:  [][]string{loadChain},
-			},
-		},
-		KeyFile:                 filepath.Join(boot.InitramfsEncryptionKeyDir, "ubuntu-data.sealed-key"),
-		TPMPolicyUpdateDataFile: filepath.Join(boot.InstallHostFDEDataDir, "policy-update-data"),
-		TPMLockoutAuthFile:      filepath.Join(boot.InstallHostFDEDataDir, "tpm-lockout-auth"),
-	}
-
-	if err := secboot.SealKey(key, &sealKeyParams); err != nil {
-		return fmt.Errorf("cannot seal the encryption key: %v", err)
-	}
+	observer.SetEncryptionKey(key)
 
 	return nil
 }
