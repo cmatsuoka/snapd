@@ -37,6 +37,7 @@ import (
 	"github.com/snapcore/snapd/dirs"
 	"github.com/snapcore/snapd/gadget"
 	"github.com/snapcore/snapd/osutil"
+	"github.com/snapcore/snapd/secboot"
 	"github.com/snapcore/snapd/snap"
 	"github.com/snapcore/snapd/snap/snapfile"
 	"github.com/snapcore/snapd/snap/snaptest"
@@ -351,7 +352,7 @@ func (s *makeBootable20Suite) TestMakeBootable20RunMode(c *C) {
 	mockSeedGrubCfg := filepath.Join(mockSeedGrubDir, "grub.cfg")
 	err = os.MkdirAll(filepath.Dir(mockSeedGrubCfg), 0755)
 	c.Assert(err, IsNil)
-	err = ioutil.WriteFile(mockSeedGrubCfg, nil, 0644)
+	err = ioutil.WriteFile(mockSeedGrubCfg, []byte("# Snapd-Boot-Config-Edition: 1\n"), 0644)
 	c.Assert(err, IsNil)
 
 	// setup recovery boot assets
@@ -384,7 +385,7 @@ func (s *makeBootable20Suite) TestMakeBootable20RunMode(c *C) {
 	grubCfg := []byte("#grub cfg")
 	err = ioutil.WriteFile(filepath.Join(unpackedGadgetDir, "grub.conf"), grubCfg, 0644)
 	c.Assert(err, IsNil)
-	grubCfgAsset := []byte("#grub cfg from assets")
+	grubCfgAsset := []byte("# Snapd-Boot-Config-Edition: 1\n#grub cfg from assets")
 	restore = assets.MockInternal("grub.cfg", grubCfgAsset)
 	defer restore()
 
@@ -440,6 +441,37 @@ version: 5.0
 	// observe recovery assets
 	err = obs.ObserveExistingTrustedRecoveryAssets(boot.InitramfsUbuntuSeedDir)
 	c.Assert(err, IsNil)
+
+	// set encryption key
+	myKey := secboot.EncryptionKey{}
+	for i := range myKey {
+		myKey[i] = byte(i)
+	}
+	obs.SetEncryptionKey(myKey)
+
+	// set mock key sealing
+	sealKeyCalls := 0
+	restore = boot.MockSecbootSealKey(func(key secboot.EncryptionKey, params *secboot.SealKeyParams) error {
+		sealKeyCalls++
+		c.Check(key, DeepEquals, myKey)
+		c.Assert(params.ModelParams, HasLen, 1)
+		c.Assert(params.ModelParams[0].Model.DisplayName(), Equals, "My Model")
+		cachedir := filepath.Join(rootdir, "var/lib/snapd/boot-assets/grub")
+		c.Assert(params.ModelParams[0].EFILoadChains, DeepEquals, [][]string{
+			{
+				filepath.Join(cachedir, "bootx64.efi-39efae6545f16e39633fbfbef0d5e9fdd45a25d7df8764978ce4d81f255b038046a38d9855e42e5c7c4024e153fd2e37"),
+				filepath.Join(cachedir, "grubx64.efi-aa3c1a83e74bf6dd40dd64e5c5bd1971d75cdf55515b23b9eb379f66bf43d4661d22c4b8cf7d7a982d2013ab65c1c4c5"),
+				filepath.Join(cachedir, "grubx64.efi-5ee042c15e104b825d6bc15c41cdb026589f1ec57ed966dd3f29f961d4d6924efc54b187743fa3a583b62722882d405d"),
+				filepath.Join(rootdir, "run/mnt/ubuntu-boot/EFI/ubuntu/kernel.efi"),
+			},
+		})
+		c.Assert(params.ModelParams[0].KernelCmdlines, DeepEquals, []string{
+			"snapd_recovery_mode=run console=ttyS0 console=tty1 panic=-1",
+			"snapd_recovery_mode=recover snapd_recovery_system=20191216 console=ttyS0 console=tty1 panic=-1",
+		})
+		return nil
+	})
+	defer restore()
 
 	err = boot.MakeBootable(model, rootdir, bootWith, obs)
 	c.Assert(err, IsNil)
@@ -515,6 +547,9 @@ current_trusted_recovery_boot_assets={"bootx64.efi":["39efae6545f16e39633fbfbef0
 	c.Check(copiedGrubBin, testutil.FileEquals, "grub content")
 	c.Check(copiedRecoveryGrubBin, testutil.FileEquals, "recovery grub content")
 	c.Check(copiedRecoveryShimBin, testutil.FileEquals, "recovery shim content")
+
+	// ensure we're sealing the key
+	c.Check(sealKeyCalls, Equals, 1)
 }
 
 func (s *makeBootable20Suite) TestMakeBootable20RunModeInstallBootConfigErr(c *C) {

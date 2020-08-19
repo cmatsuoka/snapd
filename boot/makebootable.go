@@ -33,6 +33,10 @@ import (
 	"github.com/snapcore/snapd/snap/snapfile"
 )
 
+var (
+	secbootSealKey = secboot.SealKey
+)
+
 // BootableSet represents the boot snaps of a system to be made bootable.
 type BootableSet struct {
 	Base       *snap.Info
@@ -428,7 +432,7 @@ func sealKeyToModeenv(key secboot.EncryptionKey, blName string, model *asserts.M
 		TPMLockoutAuthFile:      filepath.Join(InstallHostFDEDataDir, "tpm-lockout-auth"),
 	}
 
-	if err := secboot.SealKey(key, &sealKeyParams); err != nil {
+	if err := secbootSealKey(key, &sealKeyParams); err != nil {
 		return fmt.Errorf("cannot seal the encryption key: %v", err)
 	}
 	return nil
