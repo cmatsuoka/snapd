@@ -458,6 +458,13 @@ version: 5.0
 		c.Assert(params.ModelParams[0].Model.DisplayName(), Equals, "My Model")
 		cachedir := filepath.Join(rootdir, "var/lib/snapd/boot-assets/grub")
 		c.Assert(params.ModelParams[0].EFILoadChains, DeepEquals, [][]string{
+			// recover mode load sequence
+			{
+				filepath.Join(cachedir, "bootx64.efi-39efae6545f16e39633fbfbef0d5e9fdd45a25d7df8764978ce4d81f255b038046a38d9855e42e5c7c4024e153fd2e37"),
+				filepath.Join(cachedir, "grubx64.efi-aa3c1a83e74bf6dd40dd64e5c5bd1971d75cdf55515b23b9eb379f66bf43d4661d22c4b8cf7d7a982d2013ab65c1c4c5"),
+				filepath.Join(rootdir, "run/mnt/ubuntu-boot/EFI/ubuntu/kernel.efi"),
+			},
+			// run mode load sequence
 			{
 				filepath.Join(cachedir, "bootx64.efi-39efae6545f16e39633fbfbef0d5e9fdd45a25d7df8764978ce4d81f255b038046a38d9855e42e5c7c4024e153fd2e37"),
 				filepath.Join(cachedir, "grubx64.efi-aa3c1a83e74bf6dd40dd64e5c5bd1971d75cdf55515b23b9eb379f66bf43d4661d22c4b8cf7d7a982d2013ab65c1c4c5"),

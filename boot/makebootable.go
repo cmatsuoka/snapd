@@ -1,7 +1,7 @@
 // -*- Mode: Go; indent-tabs-mode: t -*-
 
 /*
- * Copyright (C) 2014-2019 Canonical Ltd
+ * Copyright (C) 2014-2020 Canonical Ltd
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 3 as
@@ -399,9 +399,11 @@ func sealKeyToModeenv(key secboot.EncryptionKey, blName string, model *asserts.M
 	recoveryPaths := bootAssetsPaths(blName, modeenv.CurrentTrustedRecoveryBootAssets)
 	runPaths := bootAssetsPaths(blName, modeenv.CurrentTrustedBootAssets)
 
-	// During install the recovery and installed kernels are the same
-	loadChain := append(recoveryPaths, runPaths...)
-	loadChain = append(loadChain, filepath.Join(InitramfsRunMntDir, "ubuntu-boot/EFI/ubuntu/kernel.efi"))
+	// During install the recovery and installed kernels are the same, but create two
+	// load sequences to match the policy created during resealing
+	recoverChain := append(recoveryPaths, filepath.Join(InitramfsRunMntDir, "ubuntu-boot/EFI/ubuntu/kernel.efi"))
+	runChain := append(recoveryPaths, runPaths...)
+	runChain = append(runChain, filepath.Join(InitramfsRunMntDir, "ubuntu-boot/EFI/ubuntu/kernel.efi"))
 
 	// TODO:UC20: retrieve command lines from modeenv, the format is still TBD
 	// Get the expected kernel command line for the system that is currently being installed
@@ -424,7 +426,7 @@ func sealKeyToModeenv(key secboot.EncryptionKey, blName string, model *asserts.M
 			{
 				Model:          model,
 				KernelCmdlines: kernelCmdlines,
-				EFILoadChains:  [][]string{loadChain},
+				EFILoadChains:  [][]string{recoverChain, runChain},
 			},
 		},
 		KeyFile:                 filepath.Join(InitramfsEncryptionKeyDir, "ubuntu-data.sealed-key"),
