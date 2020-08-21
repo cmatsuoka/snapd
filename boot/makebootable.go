@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/snapcore/snapd/asserts"
 	"github.com/snapcore/snapd/bootloader"
@@ -441,7 +442,17 @@ func sealKeyToModeenv(key secboot.EncryptionKey, blName string, model *asserts.M
 }
 
 func bootAssetsPaths(blName string, assetsMap bootAssetsMap) (paths []string) {
-	for asset, hashList := range assetsMap {
+	// sort the assets to have a deterministic sequence
+	keys := make([]string, len(assetsMap))
+	i := 0
+	for k := range assetsMap {
+		keys[i] = k
+		i++
+	}
+	sort.Strings(keys)
+
+	for _, asset := range keys {
+		hashList := assetsMap[asset]
 		// for the initial sealing we have exactly one hash per asset
 		if len(hashList) < 1 {
 			continue
