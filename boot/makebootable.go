@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/snapcore/snapd/asserts"
 	"github.com/snapcore/snapd/bootloader"
@@ -393,72 +392,4 @@ func makeBootable20RunMode(model *asserts.Model, rootdir string, bootWith *Boota
 	}
 
 	return nil
-}
-
-func sealKeyToModeenv(key secboot.EncryptionKey, blName string, model *asserts.Model, modeenv *Modeenv) error {
-	// Build a load chain
-	recoveryPaths := bootAssetsPaths(blName, modeenv.CurrentTrustedRecoveryBootAssets)
-	runPaths := bootAssetsPaths(blName, modeenv.CurrentTrustedBootAssets)
-
-	// During install the recovery and installed kernels are the same, but create two
-	// load sequences to match the policy created during resealing
-	recoverChain := append(recoveryPaths, filepath.Join(InitramfsRunMntDir, "ubuntu-boot/EFI/ubuntu/kernel.efi"))
-	runChain := append(recoveryPaths, runPaths...)
-	runChain = append(runChain, filepath.Join(InitramfsRunMntDir, "ubuntu-boot/EFI/ubuntu/kernel.efi"))
-
-	// TODO:UC20: retrieve command lines from modeenv, the format is still TBD
-	// Get the expected kernel command line for the system that is currently being installed
-	cmdline, err := ComposeCandidateCommandLine(model)
-	if err != nil {
-		return fmt.Errorf("cannot obtain kernel command line: %v", err)
-	}
-	// Get the expected kernel command line of the recovery system we're installing from
-	recoveryCmdline, err := ComposeRecoveryCommandLine(model, modeenv.RecoverySystem)
-	if err != nil {
-		return fmt.Errorf("cannot obtain recovery kernel command line: %v", err)
-	}
-	kernelCmdlines := []string{
-		cmdline,
-		recoveryCmdline,
-	}
-
-	sealKeyParams := secboot.SealKeyParams{
-		ModelParams: []*secboot.SealKeyModelParams{
-			{
-				Model:          model,
-				KernelCmdlines: kernelCmdlines,
-				EFILoadChains:  [][]string{recoverChain, runChain},
-			},
-		},
-		KeyFile:                 filepath.Join(InitramfsEncryptionKeyDir, "ubuntu-data.sealed-key"),
-		TPMPolicyUpdateDataFile: filepath.Join(InstallHostFDEDataDir, "policy-update-data"),
-		TPMLockoutAuthFile:      filepath.Join(InstallHostFDEDataDir, "tpm-lockout-auth"),
-	}
-
-	if err := secbootSealKey(key, &sealKeyParams); err != nil {
-		return fmt.Errorf("cannot seal the encryption key: %v", err)
-	}
-	return nil
-}
-
-func bootAssetsPaths(blName string, assetsMap bootAssetsMap) (paths []string) {
-	// sort the assets to have a deterministic sequence
-	keys := make([]string, len(assetsMap))
-	i := 0
-	for k := range assetsMap {
-		keys[i] = k
-		i++
-	}
-	sort.Strings(keys)
-
-	for _, asset := range keys {
-		hashList := assetsMap[asset]
-		// for the initial sealing we have exactly one hash per asset
-		if len(hashList) < 1 {
-			continue
-		}
-		assetPath := filepath.Join(dirs.SnapBootAssetsDir, blName, fmt.Sprintf("%s-%s", asset, hashList[0]))
-		paths = append(paths, assetPath)
-	}
-	return paths
 }
