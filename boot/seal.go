@@ -26,8 +26,6 @@ import (
 	"github.com/snapcore/snapd/asserts"
 	"github.com/snapcore/snapd/bootloader"
 	"github.com/snapcore/snapd/dirs"
-	"github.com/snapcore/snapd/logger"
-	"github.com/snapcore/snapd/osutil"
 	"github.com/snapcore/snapd/secboot"
 )
 
@@ -74,12 +72,14 @@ func sealKeyToModeenv(key secboot.EncryptionKey, model *asserts.Model, modeenv *
 		recoveryCmdline,
 	}
 
+	_ = recoverModeChains
 	sealKeyParams := secboot.SealKeyParams{
 		ModelParams: []*secboot.SealKeyModelParams{
 			{
 				Model:          model,
 				KernelCmdlines: kernelCmdlines,
-				EFILoadChains:  append(runModeChains, recoverModeChains...),
+				//EFILoadChains:  append(runModeChains, recoverModeChains...),
+				EFILoadChains: runModeChains,
 			},
 		},
 		KeyFile:                 filepath.Join(InitramfsEncryptionKeyDir, "ubuntu-data.sealed-key"),
@@ -93,6 +93,7 @@ func sealKeyToModeenv(key secboot.EncryptionKey, model *asserts.Model, modeenv *
 	return nil
 }
 
+// recoverModeLoadSequences builds the load sequences for recover mode.
 func recoverModeLoadSequences(rbl bootloader.Bootloader, modeenv *Modeenv) ([][]string, error) {
 	seq0, seq1, err := loadSequencesForBootloader(rbl, modeenv.CurrentTrustedRecoveryBootAssets)
 	if err != nil {
@@ -100,13 +101,13 @@ func recoverModeLoadSequences(rbl bootloader.Bootloader, modeenv *Modeenv) ([][]
 	}
 
 	// set a single kernel path because we don't support updating the recovery system yet
-	kernelPath, err := kernelPathFromModeenv(modeenv)
+	kernel, err := recoverModeKernelFromModeenv(modeenv)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot build load sequences for recover mode: %v", err)
 	}
 
-	seq0 = append(seq0, kernelPath)
-	seq1 = append(seq1, kernelPath)
+	seq0 = append(seq0, kernel)
+	seq1 = append(seq1, kernel)
 
 	if listEquals(seq0, seq1) {
 		return [][]string{seq0}, nil
@@ -115,6 +116,7 @@ func recoverModeLoadSequences(rbl bootloader.Bootloader, modeenv *Modeenv) ([][]
 	return [][]string{seq0, seq1}, nil
 }
 
+// runModeLoadSequences builds the load sequences for run mode.
 func runModeLoadSequences(rbl, bl bootloader.Bootloader, modeenv *Modeenv) ([][]string, error) {
 	recSeq0, recSeq1, err := loadSequencesForBootloader(rbl, modeenv.CurrentTrustedRecoveryBootAssets)
 	if err != nil {
@@ -129,10 +131,12 @@ func runModeLoadSequences(rbl, bl bootloader.Bootloader, modeenv *Modeenv) ([][]
 	seq0 := append(recSeq0, runSeq0...)
 	seq1 := append(recSeq1, runSeq1...)
 
-	// XXX: determine the correct kernel paths
-	kernelPath := filepath.Join(InitramfsRunMntDir, "ubuntu-boot/EFI/ubuntu/kernel.efi")
-	seq0 = append(seq0, kernelPath)
-	seq1 = append(seq1, kernelPath)
+	kernels, err := runModeKernelsFromModeenv(modeenv)
+	if err != nil {
+		return nil, fmt.Errorf("cannot build load sequences for run mode: %v", err)
+	}
+	seq0 = append(seq0, kernels[0])
+	seq1 = append(seq1, kernels[1])
 
 	if listEquals(seq0, seq1) {
 		return [][]string{seq0}, nil
@@ -181,26 +185,23 @@ func trustedAssetNamesForBootloader(bl bootloader.Bootloader) ([]string, error) 
 	return assetNames, nil
 }
 
-func kernelPathFromModeenv(modeenv *Modeenv) (string, error) {
-	// XXX: using the extracted kernel
-	return filepath.Join(InitramfsRunMntDir, "ubuntu-boot/EFI/ubuntu/kernel.efi"), nil
+func recoverModeKernelFromModeenv(modeenv *Modeenv) (string, error) {
+	// XXX: determine the correct kernel paths
+	kernelPath := filepath.Join(InitramfsRunMntDir, "ubuntu-boot/EFI/ubuntu/kernel.efi")
+	return kernelPath, nil
+}
 
-	if len(modeenv.CurrentKernels) < 1 {
-		return "", fmt.Errorf("cannot determine kernel path")
+func runModeKernelsFromModeenv(modeenv *Modeenv) ([]string, error) {
+	switch len(modeenv.CurrentKernels) {
+	case 1:
+		current := filepath.Join(dirs.SnapBlobDir, modeenv.CurrentKernels[0])
+		return []string{current, current}, nil
+	case 2:
+		current := filepath.Join(dirs.SnapBlobDir, modeenv.CurrentKernels[0])
+		next := filepath.Join(dirs.SnapBlobDir, modeenv.CurrentKernels[1])
+		return []string{current, next}, nil
 	}
-	kernelPath := filepath.Join(InitramfsUbuntuSeedDir, "systems", modeenv.RecoverySystem, "snaps", modeenv.CurrentKernels[0])
-	logger.Debugf("trying kernel path: %s", kernelPath)
-	if osutil.FileExists(kernelPath) {
-		return kernelPath, nil
-	}
-
-	kernelPath = filepath.Join(InitramfsUbuntuSeedDir, "snaps", modeenv.CurrentKernels[0])
-	logger.Debugf("trying kernel path: %s", kernelPath)
-	if osutil.FileExists(kernelPath) {
-		return kernelPath, nil
-	}
-
-	return "", fmt.Errorf("kernel file not found")
+	return nil, fmt.Errorf("cannot determine run mode kernel")
 }
 
 func cachedAssetPathnames(blName, name string, assetsMap bootAssetsMap) (before, after string, err error) {
