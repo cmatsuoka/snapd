@@ -39,6 +39,8 @@ import (
 	"github.com/snapcore/snapd/dirs"
 	"github.com/snapcore/snapd/osutil/disks"
 	"github.com/snapcore/snapd/secboot"
+	"github.com/snapcore/snapd/snap/snapfile"
+	"github.com/snapcore/snapd/snap/squashfs"
 	"github.com/snapcore/snapd/testutil"
 )
 
@@ -483,7 +485,7 @@ func (s *secbootSuite) TestSealKey(c *C) {
 	} {
 		tmpDir := c.MkDir()
 		var mockEFI []string
-		for _, name := range []string{"a", "b", "c", "d", "e", "f"} {
+		for _, name := range []string{"a", "b", "c", "d"} {
 			mockFileName := filepath.Join(tmpDir, name)
 			err := ioutil.WriteFile(mockFileName, nil, 0644)
 			c.Assert(err, IsNil)
@@ -493,6 +495,18 @@ func (s *secbootSuite) TestSealKey(c *C) {
 		if tc.missingFile {
 			mockEFI[0] = "/does/not/exist"
 		}
+
+		// create a snap file
+		foo := filepath.Join(tmpDir, "foo.snap")
+		snapdir := c.MkDir()
+		err := os.MkdirAll(filepath.Join(snapdir, "meta"), 0755)
+		c.Assert(err, IsNil)
+		err = ioutil.WriteFile(filepath.Join(snapdir, "meta", "snap.yaml"), []byte("name: foo"), 0644)
+		c.Assert(err, IsNil)
+		squash := squashfs.New(foo)
+		err = squash.Build(tmpDir, &squashfs.BuildOpts{SnapType: "app"})
+		c.Assert(err, IsNil)
+		mockEFI = append(mockEFI, foo)
 
 		myParams := secboot.SealKeyParams{
 			ModelParams: []*secboot.SealKeyModelParams{
@@ -542,6 +556,9 @@ func (s *secbootSuite) TestSealKey(c *C) {
 			},
 		}
 
+		foosnap, err := snapfile.Open(foo)
+		c.Assert(err, IsNil)
+
 		sequences2 := []*sb.EFIImageLoadEvent{
 			{
 				Source: sb.Firmware,
@@ -565,7 +582,11 @@ func (s *secbootSuite) TestSealKey(c *C) {
 				Next: []*sb.EFIImageLoadEvent{
 					{
 						Source: sb.Shim,
-						Image:  sb.FileEFIImage(mockEFI[4]),
+						Image: sb.SnapFileEFIImage{
+							Container: foosnap,
+							Path:      mockEFI[4],
+							FileName:  "kernel.efi",
+						},
 					},
 				},
 			},
@@ -661,7 +682,7 @@ func (s *secbootSuite) TestSealKey(c *C) {
 		})
 		defer restore()
 
-		err := secboot.SealKey(myKey, &myParams)
+		err = secboot.SealKey(myKey, &myParams)
 		if tc.expectedErr == "" {
 			c.Assert(err, IsNil)
 			c.Assert(addEFISbPolicyCalls, Equals, 2)
