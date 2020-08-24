@@ -368,7 +368,7 @@ func makeBootable20RunMode(model *asserts.Model, rootdir string, bootWith *Boota
 
 	if sealer != nil {
 		// seal the encryption key to the parameters specified in modeenv
-		if err := sealKeyToModeenv(sealer.EncryptionKey(), bl.Name(), model, modeenv); err != nil {
+		if err := sealKeyToModeenv(sealer.EncryptionKey(), model, modeenv); err != nil {
 			return err
 		}
 	}

@@ -24,19 +24,36 @@ import (
 	"path/filepath"
 
 	"github.com/snapcore/snapd/asserts"
+	"github.com/snapcore/snapd/bootloader"
 	"github.com/snapcore/snapd/dirs"
 	"github.com/snapcore/snapd/logger"
 	"github.com/snapcore/snapd/osutil"
 	"github.com/snapcore/snapd/secboot"
 )
 
-func sealKeyToModeenv(key secboot.EncryptionKey, blName string, model *asserts.Model, modeenv *Modeenv) error {
+func sealKeyToModeenv(key secboot.EncryptionKey, model *asserts.Model, modeenv *Modeenv) error {
 	// Build the recover mode load sequences
-	recoverModeChains, err := recoverModeLoadSequences(blName, modeenv)
+	rbl, err := bootloader.Find(InitramfsUbuntuSeedDir, &bootloader.Options{
+		NoSlashBoot: true,
+		Recovery:    true,
+	})
+	if err != nil {
+		return fmt.Errorf("cannot find the recovery bootloader: %v", err)
+	}
+
+	recoverModeChains, err := recoverModeLoadSequences(rbl, modeenv)
 	if err != nil {
 		return fmt.Errorf("cannot determine recover mode load sequences: %v", err)
 	}
-	runModeChains, err := runModeLoadSequences(blName, modeenv)
+
+	bl, err := bootloader.Find(InitramfsUbuntuBootDir, &bootloader.Options{
+		NoSlashBoot: true,
+	})
+	if err != nil {
+		return fmt.Errorf("cannot find the bootloader: %v", err)
+	}
+
+	runModeChains, err := runModeLoadSequences(rbl, bl, modeenv)
 	if err != nil {
 		return fmt.Errorf("cannot determine run mode load sequences: %v", err)
 	}
@@ -76,27 +93,20 @@ func sealKeyToModeenv(key secboot.EncryptionKey, blName string, model *asserts.M
 	return nil
 }
 
-func recoverModeLoadSequences(blName string, modeenv *Modeenv) ([][]string, error) {
+func recoverModeLoadSequences(rbl bootloader.Bootloader, modeenv *Modeenv) ([][]string, error) {
+	seq0, seq1, err := loadSequencesForBootloader(rbl, modeenv.CurrentTrustedRecoveryBootAssets)
+	if err != nil {
+		return nil, err
+	}
+
+	// set a single kernel path because we don't support updating the recovery system yet
 	kernelPath, err := kernelPathFromModeenv(modeenv)
 	if err != nil {
 		return nil, err
 	}
 
-	// recover mode load chains have the shim, the recovery partition bootloader, and
-	// the recovery system kernel snap.
-	seq0 := make([]string, 3)
-	seq1 := make([]string, 3)
-
-	seq0[0], seq1[0], err = cachedAssetPathnames(blName, "bootx64.efi", modeenv.CurrentTrustedRecoveryBootAssets)
-	if err != nil {
-		return nil, err
-	}
-	seq0[1], seq1[1], err = cachedAssetPathnames(blName, "grubx64.efi", modeenv.CurrentTrustedRecoveryBootAssets)
-	if err != nil {
-		return nil, err
-	}
-	seq0[2] = kernelPath
-	seq1[2] = kernelPath
+	seq0 = append(seq0, kernelPath)
+	seq1 = append(seq1, kernelPath)
 
 	if listEquals(seq0, seq1) {
 		return [][]string{seq0}, nil
@@ -105,34 +115,70 @@ func recoverModeLoadSequences(blName string, modeenv *Modeenv) ([][]string, erro
 	return [][]string{seq0, seq1}, nil
 }
 
-func runModeLoadSequences(blName string, modeenv *Modeenv) ([][]string, error) {
-	// run mode load chains have the shim, the recovery partition bootloader, the boot
-	// partition bootloader, and the extracted kernel file.
-	seq0 := make([]string, 4)
-	seq1 := make([]string, 4)
+func runModeLoadSequences(rbl, bl bootloader.Bootloader, modeenv *Modeenv) ([][]string, error) {
+	recSeq0, recSeq1, err := loadSequencesForBootloader(rbl, modeenv.CurrentTrustedRecoveryBootAssets)
+	if err != nil {
+		return nil, err
+	}
 
-	var err error
-	seq0[0], seq1[0], err = cachedAssetPathnames(blName, "bootx64.efi", modeenv.CurrentTrustedRecoveryBootAssets)
+	runSeq0, runSeq1, err := loadSequencesForBootloader(bl, modeenv.CurrentTrustedBootAssets)
 	if err != nil {
 		return nil, err
 	}
-	seq0[1], seq1[1], err = cachedAssetPathnames(blName, "grubx64.efi", modeenv.CurrentTrustedRecoveryBootAssets)
-	if err != nil {
-		return nil, err
-	}
-	seq0[3], seq1[3], err = cachedAssetPathnames(blName, "grubx64.efi", modeenv.CurrentTrustedBootAssets)
-	if err != nil {
-		return nil, err
-	}
+
+	seq0 := append(recSeq0, runSeq0...)
+	seq1 := append(recSeq1, runSeq1...)
+
 	// XXX: determine the correct kernel paths
-	seq0[2] = filepath.Join(InitramfsRunMntDir, "ubuntu-boot/EFI/ubuntu/kernel.efi")
-	seq1[2] = seq0[2]
+	kernelPath := filepath.Join(InitramfsRunMntDir, "ubuntu-boot/EFI/ubuntu/kernel.efi")
+	seq0 = append(seq0, kernelPath)
+	seq1 = append(seq1, kernelPath)
 
 	if listEquals(seq0, seq1) {
 		return [][]string{seq0}, nil
 	}
 
 	return [][]string{seq0, seq1}, nil
+}
+
+func loadSequencesForBootloader(bl bootloader.Bootloader, assetsMap bootAssetsMap) (seq0, seq1 []string, err error) {
+	assetNames, err := trustedAssetNamesForBootloader(bl)
+	if err != nil {
+		return seq0, seq1, err
+	}
+	num := len(assetNames)
+	if num == 0 {
+		return seq0, seq1, nil
+	}
+
+	seq0 = make([]string, num)
+	seq1 = make([]string, num)
+
+	for i, name := range assetNames {
+		var err error
+		seq0[i], seq1[i], err = cachedAssetPathnames(bl.Name(), name, assetsMap)
+		if err != nil {
+			return seq0, seq1, err
+		}
+	}
+
+	return seq0, seq1, nil
+}
+
+func trustedAssetNamesForBootloader(bl bootloader.Bootloader) ([]string, error) {
+	tbl, ok := bl.(bootloader.TrustedAssetsBootloader)
+	if !ok {
+		return nil, fmt.Errorf("bootloader doesn't support trusted assets")
+	}
+	assets, err := tbl.TrustedAssets()
+	if err != nil {
+		return nil, err
+	}
+	assetNames := make([]string, len(assets))
+	for i, asset := range assets {
+		assetNames[i] = filepath.Base(asset)
+	}
+	return assetNames, nil
 }
 
 func kernelPathFromModeenv(modeenv *Modeenv) (string, error) {
