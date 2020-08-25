@@ -43,7 +43,7 @@ func sealKeyToModeenv(key secboot.EncryptionKey, model *asserts.Model, modeenv *
 
 	recoverModeChains, err := recoverModeLoadSequences(rbl, modeenv)
 	if err != nil {
-		return fmt.Errorf("cannot determine recover mode load sequences: %v", err)
+		return fmt.Errorf("cannot build recover mode load sequences: %v", err)
 	}
 
 	bl, err := bootloader.Find(InitramfsUbuntuBootDir, &bootloader.Options{
@@ -55,7 +55,7 @@ func sealKeyToModeenv(key secboot.EncryptionKey, model *asserts.Model, modeenv *
 
 	runModeChains, err := runModeLoadSequences(rbl, bl, modeenv)
 	if err != nil {
-		return fmt.Errorf("cannot determine run mode load sequences: %v", err)
+		return fmt.Errorf("cannot build run mode load sequences: %v", err)
 	}
 
 	// TODO:UC20: retrieve command lines from modeenv, the format is still TBD
@@ -103,7 +103,7 @@ func recoverModeLoadSequences(rbl bootloader.Bootloader, modeenv *Modeenv) ([][]
 	// set a single kernel path because we don't support updating the recovery system yet
 	kernel, err := recoverModeKernelFromModeenv(rbl, modeenv)
 	if err != nil {
-		return nil, fmt.Errorf("cannot build load sequences for recover mode: %v", err)
+		return nil, err
 	}
 
 	seq0 = append(seq0, kernel)
@@ -133,7 +133,7 @@ func runModeLoadSequences(rbl, bl bootloader.Bootloader, modeenv *Modeenv) ([][]
 
 	current, next, err := runModeKernelsFromModeenv(modeenv)
 	if err != nil {
-		return nil, fmt.Errorf("cannot build load sequences for run mode: %v", err)
+		return nil, err
 	}
 	seq0 = append(seq0, current)
 	seq1 = append(seq1, next)
@@ -153,7 +153,7 @@ func loadSequencesForBootloader(bl bootloader.Bootloader, assetsMap bootAssetsMa
 	}
 	num := len(assetNames)
 	if num == 0 {
-		return seq0, seq1, nil
+		return []string{}, []string{}, nil
 	}
 
 	seq0 = make([]string, num)
@@ -188,17 +188,24 @@ func trustedAssetNamesForBootloader(bl bootloader.Bootloader) ([]string, error) 
 	return assetNames, nil
 }
 
-// recoverModeKernelFromModeenv obtains the path to the kernel snap for the current recovery
-// system listed in modeenv.
+// recoverModeKernelFromModeenv obtains the path to the kernel snap from the bootloader
+// configuration for the current recovery system listed in modeenv.
 func recoverModeKernelFromModeenv(bl bootloader.Bootloader, modeenv *Modeenv) (string, error) {
 	rabl, ok := bl.(bootloader.RecoveryAwareBootloader)
 	if !ok {
 		return "", fmt.Errorf("bootloader is not recovery aware")
 	}
 
+	if modeenv.RecoverySystem == "" {
+		return "", fmt.Errorf("recovery system is not defined in modeenv")
+	}
+
 	recoveryKernel, err := rabl.GetRecoverySystemEnv(filepath.Join("systems", modeenv.RecoverySystem), "snapd_recovery_kernel")
 	if err != nil {
 		return "", err
+	}
+	if recoveryKernel == "" {
+		return "", fmt.Errorf("cannot determine kernel for recovery system %q", modeenv.RecoverySystem)
 	}
 
 	return filepath.Join(dirs.SnapSeedDir, recoveryKernel), nil
@@ -215,7 +222,7 @@ func runModeKernelsFromModeenv(modeenv *Modeenv) (string, string, error) {
 		next := filepath.Join(dirs.SnapBlobDir, modeenv.CurrentKernels[1])
 		return current, next, nil
 	}
-	return "", "", fmt.Errorf("cannot determine run mode kernels")
+	return "", "", fmt.Errorf("invalid number of kernels in modeenv")
 }
 
 // cachedAssetPathnames returns the pathnames of the files corresponding to the current
@@ -227,7 +234,7 @@ func cachedAssetPathnames(blName, name string, assetsMap bootAssetsMap) (current
 
 	hashList, ok := assetsMap[name]
 	if !ok {
-		return "", "", fmt.Errorf("cannot find a hash list for asset %s", name)
+		return "", "", fmt.Errorf("cannot find asset %s in modeenv", name)
 	}
 
 	switch len(hashList) {
@@ -238,7 +245,7 @@ func cachedAssetPathnames(blName, name string, assetsMap bootAssetsMap) (current
 		current = cacheEntry(hashList[0])
 		next = cacheEntry(hashList[1])
 	default:
-		return "", "", fmt.Errorf("invalid number of hashes for asset %s", name)
+		return "", "", fmt.Errorf("invalid number of hashes for asset %s in modeenv", name)
 	}
 	return current, next, nil
 }

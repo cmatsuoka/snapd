@@ -456,7 +456,7 @@ version: 5.0
 		}
 		obs.SetEncryptionKey(myKey)
 
-		// set up system seed bootloader environment
+		// set up recovery bootloader environment
 		recoverySystemDir := filepath.Join(rootdir, "run/mnt/ubuntu-seed/systems/20191216")
 		err = os.MkdirAll(recoverySystemDir, 0755)
 		c.Assert(err, IsNil)

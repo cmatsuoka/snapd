@@ -51,6 +51,15 @@ var (
 	UnmarshalModeenvValueFromCfg = unmarshalModeenvValueFromCfg
 
 	NewTrustedAssetsCache = newTrustedAssetsCache
+
+	CachedAssetPathnames           = cachedAssetPathnames
+	RunModeKernelsFromModeenv      = runModeKernelsFromModeenv
+	RecoverModeKernelFromModeenv   = recoverModeKernelFromModeenv
+	TrustedAssetNamesForBootloader = trustedAssetNamesForBootloader
+	LoadSequencesForBootloader     = loadSequencesForBootloader
+	RunModeLoadSequences           = runModeLoadSequences
+	RecoverModeLoadSequences       = recoverModeLoadSequences
+	SealKeyToModeenv               = sealKeyToModeenv
 )
 
 type BootAssetsMap = bootAssetsMap
