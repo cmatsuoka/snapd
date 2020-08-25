@@ -29,6 +29,8 @@ import (
 	"github.com/snapcore/snapd/secboot"
 )
 
+// sealKeyToModeenv seals the supplied key to the parameters specified in modeenv
+// during system install.
 func sealKeyToModeenv(key secboot.EncryptionKey, model *asserts.Model, modeenv *Modeenv) error {
 	// Build the recover mode load sequences
 	rbl, err := bootloader.Find(InitramfsUbuntuSeedDir, &bootloader.Options{
@@ -72,14 +74,12 @@ func sealKeyToModeenv(key secboot.EncryptionKey, model *asserts.Model, modeenv *
 		recoveryCmdline,
 	}
 
-	_ = recoverModeChains
 	sealKeyParams := secboot.SealKeyParams{
 		ModelParams: []*secboot.SealKeyModelParams{
 			{
 				Model:          model,
 				KernelCmdlines: kernelCmdlines,
-				//EFILoadChains:  append(runModeChains, recoverModeChains...),
-				EFILoadChains: runModeChains,
+				EFILoadChains:  append(runModeChains, recoverModeChains...),
 			},
 		},
 		KeyFile:                 filepath.Join(InitramfsEncryptionKeyDir, "ubuntu-data.sealed-key"),
@@ -93,7 +93,7 @@ func sealKeyToModeenv(key secboot.EncryptionKey, model *asserts.Model, modeenv *
 	return nil
 }
 
-// recoverModeLoadSequences builds the load sequences for recover mode.
+// recoverModeLoadSequences builds the EFI binary load sequences for recover mode.
 func recoverModeLoadSequences(rbl bootloader.Bootloader, modeenv *Modeenv) ([][]string, error) {
 	seq0, seq1, err := loadSequencesForBootloader(rbl, modeenv.CurrentTrustedRecoveryBootAssets)
 	if err != nil {
@@ -101,7 +101,7 @@ func recoverModeLoadSequences(rbl bootloader.Bootloader, modeenv *Modeenv) ([][]
 	}
 
 	// set a single kernel path because we don't support updating the recovery system yet
-	kernel, err := recoverModeKernelFromModeenv(modeenv)
+	kernel, err := recoverModeKernelFromModeenv(rbl, modeenv)
 	if err != nil {
 		return nil, fmt.Errorf("cannot build load sequences for recover mode: %v", err)
 	}
@@ -116,7 +116,7 @@ func recoverModeLoadSequences(rbl bootloader.Bootloader, modeenv *Modeenv) ([][]
 	return [][]string{seq0, seq1}, nil
 }
 
-// runModeLoadSequences builds the load sequences for run mode.
+// runModeLoadSequences builds the EFI binary load sequences for run mode.
 func runModeLoadSequences(rbl, bl bootloader.Bootloader, modeenv *Modeenv) ([][]string, error) {
 	recSeq0, recSeq1, err := loadSequencesForBootloader(rbl, modeenv.CurrentTrustedRecoveryBootAssets)
 	if err != nil {
@@ -131,12 +131,12 @@ func runModeLoadSequences(rbl, bl bootloader.Bootloader, modeenv *Modeenv) ([][]
 	seq0 := append(recSeq0, runSeq0...)
 	seq1 := append(recSeq1, runSeq1...)
 
-	kernels, err := runModeKernelsFromModeenv(modeenv)
+	current, next, err := runModeKernelsFromModeenv(modeenv)
 	if err != nil {
 		return nil, fmt.Errorf("cannot build load sequences for run mode: %v", err)
 	}
-	seq0 = append(seq0, kernels[0])
-	seq1 = append(seq1, kernels[1])
+	seq0 = append(seq0, current)
+	seq1 = append(seq1, next)
 
 	if listEquals(seq0, seq1) {
 		return [][]string{seq0}, nil
@@ -145,6 +145,7 @@ func runModeLoadSequences(rbl, bl bootloader.Bootloader, modeenv *Modeenv) ([][]
 	return [][]string{seq0, seq1}, nil
 }
 
+// loadSequencesForBootloader lists the trusted cached assets for the given bootloader.
 func loadSequencesForBootloader(bl bootloader.Bootloader, assetsMap bootAssetsMap) (seq0, seq1 []string, err error) {
 	assetNames, err := trustedAssetNamesForBootloader(bl)
 	if err != nil {
@@ -169,6 +170,8 @@ func loadSequencesForBootloader(bl bootloader.Bootloader, assetsMap bootAssetsMa
 	return seq0, seq1, nil
 }
 
+// trustedAssetNamesForBootloader builds a list with the names of the trusted assets for
+// the given bootloader from the list of trusted asset pathnames.
 func trustedAssetNamesForBootloader(bl bootloader.Bootloader) ([]string, error) {
 	tbl, ok := bl.(bootloader.TrustedAssetsBootloader)
 	if !ok {
@@ -185,26 +188,39 @@ func trustedAssetNamesForBootloader(bl bootloader.Bootloader) ([]string, error) 
 	return assetNames, nil
 }
 
-func recoverModeKernelFromModeenv(modeenv *Modeenv) (string, error) {
-	// XXX: determine the correct kernel paths
-	kernelPath := filepath.Join(InitramfsRunMntDir, "ubuntu-boot/EFI/ubuntu/kernel.efi")
-	return kernelPath, nil
+// recoverModeKernelFromModeenv obtains the path to the kernel snap for the current recovery
+// system listed in modeenv.
+func recoverModeKernelFromModeenv(bl bootloader.Bootloader, modeenv *Modeenv) (string, error) {
+	rabl, ok := bl.(bootloader.RecoveryAwareBootloader)
+	if !ok {
+		return "", fmt.Errorf("bootloader is not recovery aware")
+	}
+
+	recoveryKernel, err := rabl.GetRecoverySystemEnv(filepath.Join("systems", modeenv.RecoverySystem), "snapd_recovery_kernel")
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(dirs.SnapSeedDir, recoveryKernel), nil
 }
 
-func runModeKernelsFromModeenv(modeenv *Modeenv) ([]string, error) {
+// runModeKernelsFromModeenv obtains the current and next kernels listed in modeenv.
+func runModeKernelsFromModeenv(modeenv *Modeenv) (string, string, error) {
 	switch len(modeenv.CurrentKernels) {
 	case 1:
 		current := filepath.Join(dirs.SnapBlobDir, modeenv.CurrentKernels[0])
-		return []string{current, current}, nil
+		return current, current, nil
 	case 2:
 		current := filepath.Join(dirs.SnapBlobDir, modeenv.CurrentKernels[0])
 		next := filepath.Join(dirs.SnapBlobDir, modeenv.CurrentKernels[1])
-		return []string{current, next}, nil
+		return current, next, nil
 	}
-	return nil, fmt.Errorf("cannot determine run mode kernel")
+	return "", "", fmt.Errorf("cannot determine run mode kernels")
 }
 
-func cachedAssetPathnames(blName, name string, assetsMap bootAssetsMap) (before, after string, err error) {
+// cachedAssetPathnames returns the pathnames of the files corresponding to the current
+// and next instances of a given boot asset.
+func cachedAssetPathnames(blName, name string, assetsMap bootAssetsMap) (current, next string, err error) {
 	cacheEntry := func(hash string) string {
 		return filepath.Join(dirs.SnapBootAssetsDir, blName, fmt.Sprintf("%s-%s", name, hash))
 	}
@@ -216,15 +232,15 @@ func cachedAssetPathnames(blName, name string, assetsMap bootAssetsMap) (before,
 
 	switch len(hashList) {
 	case 1:
-		before = cacheEntry(hashList[0])
-		after = before
+		current = cacheEntry(hashList[0])
+		next = current
 	case 2:
-		before = cacheEntry(hashList[0])
-		after = cacheEntry(hashList[1])
+		current = cacheEntry(hashList[0])
+		next = cacheEntry(hashList[1])
 	default:
 		return "", "", fmt.Errorf("invalid number of hashes for asset %s", name)
 	}
-	return before, after, nil
+	return current, next, nil
 }
 
 func listEquals(a, b []string) bool {
