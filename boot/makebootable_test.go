@@ -456,6 +456,15 @@ version: 5.0
 		}
 		obs.SetEncryptionKey(myKey)
 
+		// set up system seed bootloader environment
+		recoverySystemDir := filepath.Join(rootdir, "run/mnt/ubuntu-seed/systems/20191216")
+		err = os.MkdirAll(recoverySystemDir, 0755)
+		c.Assert(err, IsNil)
+		envData := make([]byte, 1024)
+		copy(envData, []byte("# GRUB Environment Block\nsnapd_recovery_kernel=/snaps/pc-kernel_1.snap\n"))
+		err = ioutil.WriteFile(filepath.Join(recoverySystemDir, "grubenv"), envData, 0644)
+		c.Assert(err, IsNil)
+
 		// set mock key sealing
 		sealKeyCalls := 0
 		restore = boot.MockSecbootSealKey(func(key secboot.EncryptionKey, params *secboot.SealKeyParams) error {
@@ -465,18 +474,18 @@ version: 5.0
 			c.Assert(params.ModelParams[0].Model.DisplayName(), Equals, "My Model")
 			cachedir := filepath.Join(rootdir, "var/lib/snapd/boot-assets/grub")
 			c.Assert(params.ModelParams[0].EFILoadChains, DeepEquals, [][]string{
-				// recover mode load sequence
-				{
-					filepath.Join(cachedir, "bootx64.efi-39efae6545f16e39633fbfbef0d5e9fdd45a25d7df8764978ce4d81f255b038046a38d9855e42e5c7c4024e153fd2e37"),
-					filepath.Join(cachedir, "grubx64.efi-aa3c1a83e74bf6dd40dd64e5c5bd1971d75cdf55515b23b9eb379f66bf43d4661d22c4b8cf7d7a982d2013ab65c1c4c5"),
-					filepath.Join(rootdir, "run/mnt/ubuntu-boot/EFI/ubuntu/kernel.efi"),
-				},
 				// run mode load sequence
 				{
 					filepath.Join(cachedir, "bootx64.efi-39efae6545f16e39633fbfbef0d5e9fdd45a25d7df8764978ce4d81f255b038046a38d9855e42e5c7c4024e153fd2e37"),
 					filepath.Join(cachedir, "grubx64.efi-aa3c1a83e74bf6dd40dd64e5c5bd1971d75cdf55515b23b9eb379f66bf43d4661d22c4b8cf7d7a982d2013ab65c1c4c5"),
 					filepath.Join(cachedir, "grubx64.efi-5ee042c15e104b825d6bc15c41cdb026589f1ec57ed966dd3f29f961d4d6924efc54b187743fa3a583b62722882d405d"),
-					filepath.Join(rootdir, "run/mnt/ubuntu-boot/EFI/ubuntu/kernel.efi"),
+					filepath.Join(rootdir, "var/lib/snapd/snaps/pc-kernel_5.snap"),
+				},
+				// recover mode load sequence
+				{
+					filepath.Join(cachedir, "bootx64.efi-39efae6545f16e39633fbfbef0d5e9fdd45a25d7df8764978ce4d81f255b038046a38d9855e42e5c7c4024e153fd2e37"),
+					filepath.Join(cachedir, "grubx64.efi-aa3c1a83e74bf6dd40dd64e5c5bd1971d75cdf55515b23b9eb379f66bf43d4661d22c4b8cf7d7a982d2013ab65c1c4c5"),
+					filepath.Join(rootdir, "var/lib/snapd/seed/snaps/pc-kernel_1.snap"),
 				},
 			})
 			c.Assert(params.ModelParams[0].KernelCmdlines, DeepEquals, []string{
