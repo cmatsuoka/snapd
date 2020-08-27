@@ -23,27 +23,3 @@ package secboot
 // the github.com/snapcore/secboot repository. That will ensure
 // it can be build as part of the debian build without secboot.
 // Debian does run "go list" without any support for passing -tags.
-
-import (
-	"github.com/snapcore/snapd/asserts"
-)
-
-type SealKeyModelParams struct {
-	// The snap model
-	Model *asserts.Model
-	// The set of EFI binary load paths for the current device configuration
-	EFILoadChains [][]string
-	// The kernel command line
-	KernelCmdlines []string
-}
-
-type SealKeyParams struct {
-	// The snap model
-	ModelParams []*SealKeyModelParams
-	// The path to store the sealed key file
-	KeyFile string
-	// The path to authorization policy update data file (only relevant for TPM)
-	TPMPolicyUpdateDataFile string
-	// The path to the lockout authorization file (only relevant for TPM)
-	TPMLockoutAuthFile string
-}

@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/canonical/go-tpm2"
 	sb "github.com/snapcore/secboot"
@@ -305,6 +304,56 @@ func unlockEncryptedPartitionWithSealedKey(tpm *sb.TPMConnection, name, device, 
 	return nil
 }
 
+type EFIImage interface {
+	image() (sb.EFIImage, error)
+}
+
+type FileEFIImage string
+
+func (e FileEFIImage) image() (sb.EFIImage, error) {
+	if !osutil.FileExists(string(e)) {
+		return nil, fmt.Errorf("file %s does not exist", e)
+	}
+	return sb.FileEFIImage(e), nil
+}
+
+type SnapEFIImage struct {
+	Snap     string
+	Relative string
+}
+
+func (e SnapEFIImage) image() (sb.EFIImage, error) {
+	snapf, err := snapfile.Open(e.Snap)
+	if err != nil {
+		return nil, err
+	}
+	return sb.SnapFileEFIImage{
+		Container: snapf,
+		Path:      e.Snap,
+		FileName:  e.Relative,
+	}, nil
+}
+
+type SealKeyModelParams struct {
+	// The snap model
+	Model *asserts.Model
+	// The set of EFI binary load paths for the current device configuration
+	EFILoadChains [][]EFIImage
+	// The kernel command line
+	KernelCmdlines []string
+}
+
+type SealKeyParams struct {
+	// The snap model
+	ModelParams []*SealKeyModelParams
+	// The path to store the sealed key file
+	KeyFile string
+	// The path to authorization policy update data file (only relevant for TPM)
+	TPMPolicyUpdateDataFile string
+	// The path to the lockout authorization file (only relevant for TPM)
+	TPMLockoutAuthFile string
+}
+
 // SealKey provisions the TPM and seals a partition encryption key according to the
 // specified parameters. If the TPM is already provisioned, or a sealed key already
 // exists, SealKey will fail and return an error.
@@ -326,13 +375,6 @@ func SealKey(key EncryptionKey, params *SealKeyParams) error {
 
 	for _, modelParams := range params.ModelParams {
 		modelProfile := sb.NewPCRProtectionProfile()
-
-		// Verify if all EFI image files exist
-		for _, chain := range modelParams.EFILoadChains {
-			if err := checkFilesPresence(chain); err != nil {
-				return err
-			}
-		}
 
 		// Add EFI secure boot policy profile
 		loadSequences, err := buildLoadSequences(modelParams.EFILoadChains)
@@ -427,7 +469,7 @@ func tpmProvision(tpm *sb.TPMConnection, lockoutAuthFile string) error {
 
 // buildLoadSequences creates a linear EFI image load event chain for each one of the
 // specified sequences of file paths.
-func buildLoadSequences(pathSequences [][]string) ([]*sb.EFIImageLoadEvent, error) {
+func buildLoadSequences(imageSequences [][]EFIImage) ([]*sb.EFIImageLoadEvent, error) {
 	// The idea of EFIImageLoadEvent is to build a set of load paths for the current
 	// device configuration. So you could have something like this:
 	//
@@ -449,32 +491,18 @@ func buildLoadSequences(pathSequences [][]string) ([]*sb.EFIImageLoadEvent, erro
 	// the system with the Microsoft chain of trust, then the actual trees of
 	// EFIImageLoadEvents will need to match the exact supported boot sequences.
 
-	loadEvents := make([]*sb.EFIImageLoadEvent, 0, len(pathSequences))
+	loadEvents := make([]*sb.EFIImageLoadEvent, 0, len(imageSequences))
 
-	efiImage := func(name string) (sb.EFIImage, error) {
-		if strings.HasSuffix(name, ".snap") {
-			snapf, err := snapfile.Open(name)
-			if err != nil {
-				return nil, err
-			}
-			return sb.SnapFileEFIImage{
-				Container: snapf,
-				Path:      name,
-				FileName:  "kernel.efi",
-			}, nil
-		}
-		return sb.FileEFIImage(name), nil
-	}
-
-	for _, filePaths := range pathSequences {
+	for _, sequence := range imageSequences {
 		var event *sb.EFIImageLoadEvent
 		var next []*sb.EFIImageLoadEvent
 
-		for i := len(filePaths) - 1; i >= 0; i-- {
-			image, err := efiImage(filePaths[i])
+		for i := len(sequence) - 1; i >= 0; i-- {
+			image, err := sequence[i].image()
 			if err != nil {
 				return nil, err
 			}
+
 			event = &sb.EFIImageLoadEvent{
 				Source: sb.Shim,
 				Image:  image,
@@ -489,13 +517,4 @@ func buildLoadSequences(pathSequences [][]string) ([]*sb.EFIImageLoadEvent, erro
 	}
 
 	return loadEvents, nil
-}
-
-func checkFilesPresence(pathList []string) error {
-	for _, p := range pathList {
-		if !osutil.FileExists(p) {
-			return fmt.Errorf("file %s does not exist", p)
-		}
-	}
-	return nil
 }
