@@ -95,120 +95,143 @@ func sealKeyToModeenv(key secboot.EncryptionKey, model *asserts.Model, modeenv *
 
 // recoverModeLoadSequences builds the EFI binary load sequences for recover mode.
 func recoverModeLoadSequences(rbl bootloader.Bootloader, modeenv *Modeenv) ([][]string, error) {
-	seq0, seq1, err := loadSequencesForBootloader(rbl, modeenv.CurrentTrustedRecoveryBootAssets)
+	tbl, ok := rbl.(bootloader.TrustedAssetsBootloader)
+	if !ok {
+		return nil, fmt.Errorf("bootloader doesn't support trusted assets")
+	}
+
+	bootChain, err := tbl.RecoveryBootChain(filepath.Join("systems", modeenv.RecoverySystem))
 	if err != nil {
 		return nil, err
 	}
 
-	// set a single kernel path because we don't support updating the recovery system yet
-	kernel, err := recoverModeKernelFromModeenv(rbl, modeenv)
-	if err != nil {
-		return nil, err
+	seq0 := make([]string, 0, len(bootChain))
+	seq1 := make([]string, 0, len(bootChain))
+
+	// walk the chain and recover cache entries for the trusted assets
+	for _, image := range bootChain {
+		switch image.Type {
+		case boot.RecoveryBootAsset:
+			p0, p1, err = cachedAssetPathnames(rbl.Name(), image.Path(), modeenv.CurrentTrustedRecoveryBootAssets)
+			if err != nil {
+				return nil, err
+			}
+			seq0 = append(seq0, p0)
+			seq1 = append(seq1, p1)
+		case boot.RecoveryKernel:
+			seq0 = append(seq0, image)
+			seq0 = append(seq1, image)
+		default:
+			return nil, fmt.Errorf("invalid entry in the recovery boot chain")
+		}
 	}
 
-	seq0 = append(seq0, kernel)
-	seq1 = append(seq1, kernel)
-
-	if listEquals(seq0, seq1) {
+	if sequenceEquals(seq0, seq1) {
 		return [][]string{seq0}, nil
 	}
 
 	return [][]string{seq0, seq1}, nil
+
+	/*
+		seq0, seq1, err := loadSequencesForBootloader(rbl, modeenv.CurrentTrustedRecoveryBootAssets)
+		if err != nil {
+			return nil, err
+		}
+
+		// set a single kernel path because we don't support updating the recovery system yet
+		kernel, err := recoverModeKernelFromModeenv(rbl, modeenv)
+		if err != nil {
+			return nil, err
+		}
+
+		seq0 = append(seq0, kernel)
+		seq1 = append(seq1, kernel)
+
+		if listEquals(seq0, seq1) {
+			return [][]string{seq0}, nil
+		}
+
+		return [][]string{seq0, seq1}, nil
+	*/
 }
 
 // runModeLoadSequences builds the EFI binary load sequences for run mode.
 func runModeLoadSequences(rbl, bl bootloader.Bootloader, modeenv *Modeenv) ([][]string, error) {
-	recSeq0, recSeq1, err := loadSequencesForBootloader(rbl, modeenv.CurrentTrustedRecoveryBootAssets)
+	tbl, ok := rbl.(bootloader.TrustedAssetsBootloader)
+	if !ok {
+		return nil, fmt.Errorf("bootloader doesn't support trusted assets")
+	}
+
+	bootChain, err := tbl.BootChain(bl)
 	if err != nil {
 		return nil, err
 	}
 
-	runSeq0, runSeq1, err := loadSequencesForBootloader(bl, modeenv.CurrentTrustedBootAssets)
-	if err != nil {
-		return nil, err
+	seq0 := make([]string, 0, len(bootChain))
+	seq1 := make([]string, 0, len(bootChain))
+
+	// walk the chain and recover cache entries for the trusted assets
+	for _, image := range bootChain {
+		switch image.Type {
+		case boot.RecoveryBootAsset:
+			p0, p1, err = cachedAssetPathnames(rbl.Name(), image.Path(), modeenv.CurrentTrustedRecoveryBootAssets)
+			if err != nil {
+				return nil, err
+			}
+			seq0 = append(seq0, p0)
+			seq1 = append(seq1, p1)
+		case boot.BootAsset:
+			p0, p1, err = cachedAssetPathnames(bl.Name(), image.Path(), modeenv.CurrentTrustedBootAssets)
+			if err != nil {
+				return nil, err
+			}
+			seq0 = append(seq0, p0)
+			seq1 = append(seq1, p1)
+		case boot.BootKernel:
+			current, next, err := runModeKernelsFromModeenv(modeenv)
+			if err != nil {
+				return nil, err
+			}
+			seq0 = append(seq0, current)
+			seq1 = append(seq1, next)
+		default:
+			return nil, fmt.Errorf("invalid entry in the boot chain")
+		}
 	}
 
-	seq0 := append(recSeq0, runSeq0...)
-	seq1 := append(recSeq1, runSeq1...)
-
-	current, next, err := runModeKernelsFromModeenv(modeenv)
-	if err != nil {
-		return nil, err
-	}
-	seq0 = append(seq0, current)
-	seq1 = append(seq1, next)
-
-	if listEquals(seq0, seq1) {
+	if sequenceEquals(seq0, seq1) {
 		return [][]string{seq0}, nil
 	}
 
 	return [][]string{seq0, seq1}, nil
-}
 
-// loadSequencesForBootloader lists the trusted cached assets for the given bootloader.
-func loadSequencesForBootloader(bl bootloader.Bootloader, assetsMap bootAssetsMap) (seq0, seq1 []string, err error) {
-	assetNames, err := trustedAssetNamesForBootloader(bl)
-	if err != nil {
-		return seq0, seq1, err
-	}
-	num := len(assetNames)
-	if num == 0 {
-		return []string{}, []string{}, nil
-	}
-
-	seq0 = make([]string, num)
-	seq1 = make([]string, num)
-
-	for i, name := range assetNames {
-		var err error
-		seq0[i], seq1[i], err = cachedAssetPathnames(bl.Name(), name, assetsMap)
+	/*
+		recSeq0, recSeq1, err := loadSequencesForBootloader(rbl, modeenv.CurrentTrustedRecoveryBootAssets)
 		if err != nil {
-			return seq0, seq1, err
+			return nil, err
 		}
-	}
 
-	return seq0, seq1, nil
-}
+		runSeq0, runSeq1, err := loadSequencesForBootloader(bl, modeenv.CurrentTrustedBootAssets)
+		if err != nil {
+			return nil, err
+		}
 
-// trustedAssetNamesForBootloader builds a list with the names of the trusted assets for
-// the given bootloader from the list of trusted asset pathnames.
-func trustedAssetNamesForBootloader(bl bootloader.Bootloader) ([]string, error) {
-	tbl, ok := bl.(bootloader.TrustedAssetsBootloader)
-	if !ok {
-		return nil, fmt.Errorf("bootloader doesn't support trusted assets")
-	}
-	assets, err := tbl.TrustedAssets()
-	if err != nil {
-		return nil, err
-	}
-	assetNames := make([]string, len(assets))
-	for i, asset := range assets {
-		assetNames[i] = filepath.Base(asset)
-	}
-	return assetNames, nil
-}
+		seq0 := append(recSeq0, runSeq0...)
+		seq1 := append(recSeq1, runSeq1...)
 
-// recoverModeKernelFromModeenv obtains the path to the kernel snap from the bootloader
-// configuration for the current recovery system listed in modeenv.
-func recoverModeKernelFromModeenv(bl bootloader.Bootloader, modeenv *Modeenv) (string, error) {
-	rabl, ok := bl.(bootloader.RecoveryAwareBootloader)
-	if !ok {
-		return "", fmt.Errorf("bootloader is not recovery aware")
-	}
+		current, next, err := runModeKernelsFromModeenv(modeenv)
+		if err != nil {
+			return nil, err
+		}
+		seq0 = append(seq0, current)
+		seq1 = append(seq1, next)
 
-	if modeenv.RecoverySystem == "" {
-		return "", fmt.Errorf("recovery system is not defined in modeenv")
-	}
+		if listEquals(seq0, seq1) {
+			return [][]string{seq0}, nil
+		}
 
-	recoveryKernel, err := rabl.GetRecoverySystemEnv(filepath.Join("systems", modeenv.RecoverySystem), "snapd_recovery_kernel")
-	if err != nil {
-		return "", err
-	}
-	if recoveryKernel == "" {
-		return "", fmt.Errorf("cannot determine kernel for recovery system %q", modeenv.RecoverySystem)
-	}
-
-	return filepath.Join(dirs.SnapSeedDir, recoveryKernel), nil
+		return [][]string{seq0, seq1}, nil
+	*/
 }
 
 // runModeKernelsFromModeenv obtains the current and next kernels listed in modeenv.

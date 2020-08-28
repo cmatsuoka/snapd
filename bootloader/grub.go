@@ -522,7 +522,7 @@ func (g *grub) RecoveryBootChain(recoverySystemDir string) ([]BootFile, error) {
 	return chain, nil
 }
 
-func (g *grub) BootChain(runBl TrustedAssetsBootloader) {
+func (g *grub) BootChain(runBl TrustedAssetsBootloader) ([]BootFile, error) {
 	if !g.recovery {
 		return nil, fmt.Errorf("not a recovery bootloader")
 	}
