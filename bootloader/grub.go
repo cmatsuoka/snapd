@@ -478,3 +478,79 @@ func (g *grub) TrustedAssets() ([]string, error) {
 		"EFI/boot/grubx64.efi",
 	}, nil
 }
+
+const (
+	RecoveryBootloaderAsset = iota
+	RecoveryBootloaderKernel
+	BootloaderAsset
+	BootloaderKernel
+)
+
+type BootFile struct {
+	Type     int
+	Path     string
+	Relative string
+}
+
+func (g *grub) RecoveryBootChain(recoverySystemDir string) ([]BootFile, error) {
+	if !g.recovery {
+		return nil, fmt.Errorf("not a recovery bootloader")
+	}
+
+	kernelSnap, err := g.GetRecoverySystemEnv(recoverySystemDir, "snapd_recovery_kernel")
+	if err != nil {
+		return nil, err
+	}
+
+	trustedAssets, err := g.TrustedAssets()
+	if err != nil {
+		return nil, err
+	}
+
+	// add trusted assets to the recovery chain
+	chain := make([]BootFile, 0, len(trustedAssets)+1)
+	for i, ta := range trustedAssets {
+		chain = append(chain, BootFile{Type: RecoveryBootloaderAsset, Path: filepath.Base(ta)})
+	}
+	// add recovery kernel to the recovery chain
+	chain = append(chain, BootFile{
+		Type:     RecoveryBootloaderKernel,
+		Path:     filepath.Join(dirs.SnapSeedDir, kernelSnap),
+		Relative: "kernel.efi",
+	})
+
+	return chain, nil
+}
+
+func (g *grub) BootChain(runBl TrustedAssetsBootloader) {
+	if !g.recovery {
+		return nil, fmt.Errorf("not a recovery bootloader")
+	}
+
+	trustedAssets, err := g.TrustedAssets()
+	if err != nil {
+		return nil, err
+	}
+
+	runTrustedAssets, err := runBl.TrustedAssets()
+	if err != nil {
+		return nil, err
+	}
+
+	// add trusted assets to the recovery chain
+	chain := make([]BootFile, 0, len(trustedAssets)+len(runTrustedAssets)+1)
+	for i, ta := range trustedAssets {
+		chain = append(chain, BootFile{Type: RecoveryBootloaderAsset, Path: filepath.Base(ta)})
+	}
+	for i, ta := range trustedAssets {
+		chain = append(chain, BootFile{Type: BootloaderAsset, Path: filepath.Base(ta)})
+	}
+	// add kernel to the boot chain
+	chain = append(chain, BootFile{
+		Type:     BootloaderKernel,
+		Path:     g.Kernel(),
+		Relative: "kernel.efi",
+	})
+
+	return chain, nil
+}
