@@ -43,7 +43,8 @@ import (
 
 const (
 	// Handles are in the block reserved for owner objects (0x01800000 - 0x01bfffff)
-	pinHandle = 0x01880000
+	pinHandle           = 0x01880000
+	policyCounterHandle = 0x01880001
 )
 
 var (
@@ -59,6 +60,7 @@ var (
 	sbAddSnapModelProfile            = sb.AddSnapModelProfile
 	sbProvisionTPM                   = sb.ProvisionTPM
 	sbSealKeyToTPM                   = sb.SealKeyToTPM
+	sbReadSealedKeyObject            = sb.ReadSealedKeyObject
 	sbUpdateKeyPCRProtectionPolicy   = sb.UpdateKeyPCRProtectionPolicy
 
 	randutilRandomKernelUUID = randutil.RandomKernelUUID
@@ -337,10 +339,12 @@ func SealKey(key EncryptionKey, params *SealKeyParams) error {
 
 	// Seal key to the TPM
 	creationParams := sb.KeyCreationParams{
-		PCRProfile: pcrProfile,
-		PINHandle:  pinHandle,
+		PCRProfile:             pcrProfile,
+		PCRPolicyCounterHandle: policyCounterHandle,
 	}
-	return sbSealKeyToTPM(tpm, key[:], params.KeyFile, params.TPMPolicyUpdateDataFile, &creationParams)
+	_, err = sbSealKeyToTPM(tpm, key[:], params.KeyFile, &creationParams)
+
+	return err
 }
 
 // ResealKey updates the PCR protection policy for the sealed encryption key according to
@@ -365,7 +369,16 @@ func ResealKey(params *ResealKeyParams) error {
 		return err
 	}
 
-	return sbUpdateKeyPCRProtectionPolicy(tpm, params.KeyFile, params.TPMPolicyUpdateDataFile, pcrProfile)
+	k, err := sbReadSealedKeyObject(params.KeyFile)
+	if err != nil {
+		return fmt.Errorf("cannot read the sealed key: %v", err)
+	}
+	_, authKey, err := k.UnsealFromTPM(tpm, "")
+	if err != nil {
+		return fmt.Errorf("cannot unseal the authorization policy update key: %v", err)
+	}
+
+	return sbUpdateKeyPCRProtectionPolicy(tpm, params.KeyFile, authKey, pcrProfile)
 }
 
 func buildPCRProtectionProfile(modelParams []*SealKeyModelParams) (*sb.PCRProtectionProfile, error) {
@@ -420,7 +433,7 @@ func buildPCRProtectionProfile(modelParams []*SealKeyModelParams) (*sb.PCRProtec
 			snapModelParams := sb.SnapModelProfileParams{
 				PCRAlgorithm: tpm2.HashAlgorithmSHA256,
 				PCRIndex:     tpmPCR,
-				Models:       []sb.SnapModel{mp.Model},
+				Models:       []*asserts.Model{mp.Model},
 			}
 			if err := sbAddSnapModelProfile(modelProfile, &snapModelParams); err != nil {
 				return nil, fmt.Errorf("cannot add snap model profile: %v", err)
