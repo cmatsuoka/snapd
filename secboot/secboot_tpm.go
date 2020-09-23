@@ -21,10 +21,13 @@
 package secboot
 
 import (
+	"bytes"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/canonical/go-tpm2"
@@ -38,6 +41,7 @@ import (
 	"github.com/snapcore/snapd/osutil"
 	"github.com/snapcore/snapd/osutil/disks"
 	"github.com/snapcore/snapd/randutil"
+	"github.com/snapcore/snapd/snap"
 	"github.com/snapcore/snapd/snap/snapfile"
 )
 
@@ -68,11 +72,21 @@ var (
 	isTPMEnabled = isTPMEnabledImpl
 )
 
+func IsFDEHelperEnabled() bool {
+	// XXX: enable this after checking if the helper should be used
+	return true
+}
+
 func isTPMEnabledImpl(tpm *sb.TPMConnection) bool {
 	return tpm.IsEnabled()
 }
 
-func CheckKeySealingSupported() error {
+func CheckKeySealingSupported(gadgetInfo *snap.Info) error {
+	if IsFDEHelperEnabled() {
+		logger.Noticef("checking if secure FDE is supported...")
+		return fdeSupportedHook(gadgetInfo.MountDir())
+	}
+
 	logger.Noticef("checking if secure boot is enabled...")
 	if err := checkSecureBootEnabled(); err != nil {
 		logger.Noticef("secure boot not enabled: %v", err)
@@ -190,6 +204,20 @@ func MeasureSnapModelWhenPossible(findModel func() (*asserts.Model, error)) erro
 // in the encrypted case). If no encrypted volume was found, then the returned
 // device node is an unencrypted normal volume.
 func UnlockVolumeIfEncrypted(disk disks.Disk, name string, encryptionKeyDir string, lockKeysOnFinish bool) (string, bool, error) {
+	// XXX
+	if IsFDEHelperEnabled() {
+		partUUID, err := disk.FindMatchingPartitionUUID(name + "-enc")
+		if err != nil {
+			return "", false, err
+		}
+		encdev := filepath.Join("/dev/disk/by-partuuid", partUUID)
+		mapperName := name + "-" + randutilRandomKernelUUID()
+		if err := fdeUnlockVolumeHook(mapperName, encdev, lockKeysOnFinish); err != nil {
+			return "", false, err
+		}
+		return filepath.Join("/dev/mapper", mapperName), true, nil
+	}
+
 	// TODO:UC20: use sb.SecureConnectToDefaultTPM() if we decide there's benefit in doing that or
 	//            we have a hard requirement for a valid EK cert chain for every boot (ie, panic
 	//            if there isn't one). But we can't do that as long as we need to download
@@ -536,4 +564,40 @@ func efiImageFromBootFile(b *bootloader.BootFile) (sb.EFIImage, error) {
 		Path:      b.Snap,
 		FileName:  b.Path,
 	}, nil
+}
+
+func fdeSupportedHook(gadgetDir string) error {
+	// this is used only during the installation process
+	out, err := exec.Command(filepath.Join(gadgetDir, "fde-helper"), "--supported").CombinedOutput()
+	if err != nil {
+		return osutil.OutputErr(out, err)
+	}
+	return nil
+}
+
+type fdeUnlockHookParams struct {
+	VolumeName       string `json:"volume-name"`
+	SourceDevicePath string `json:"source-device-path"`
+	LockKeysOnFinish bool   `json:"lock-keys-on-finish"`
+}
+
+func fdeUnlockVolumeHook(volumeName, sourceDevicePath string, lockKeysOnFinish bool) error {
+	params := fdeUnlockHookParams{
+		VolumeName:       volumeName,
+		SourceDevicePath: sourceDevicePath,
+		LockKeysOnFinish: lockKeysOnFinish,
+	}
+
+	j, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command("/run/mnt/ubuntu-boot/fde-helper", "--unlock")
+	cmd.Stdin = bytes.NewReader(j)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return osutil.OutputErr(out, err)
+	}
+	return nil
 }
