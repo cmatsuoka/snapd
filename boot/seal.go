@@ -20,17 +20,16 @@
 package boot
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/snapcore/snapd/asserts"
 	"github.com/snapcore/snapd/bootloader"
 	"github.com/snapcore/snapd/dirs"
+	"github.com/snapcore/snapd/fdehelper"
 	"github.com/snapcore/snapd/logger"
 	"github.com/snapcore/snapd/osutil"
 	"github.com/snapcore/snapd/secboot"
@@ -65,8 +64,11 @@ func sealKeyToModeenv(key secboot.EncryptionKey, model *asserts.Model, bootWith 
 	tbl, ok := rbl.(bootloader.TrustedAssetsBootloader)
 	if !ok {
 		// we can still seal if we're using an external FDE helper
-		if secboot.IsFDEHelperEnabled() {
-			return fdeSealKeyHook(key, predictableBootChains{}, bootWith.UnpackedGadgetDir)
+		if fdehelper.Enabled() {
+			params := &fdehelper.InitialProvisionParams{
+				Key: base64.RawStdEncoding.EncodeToString(key[:]),
+			}
+			return fdehelper.InitialProvision(params, bootWith.UnpackedGadgetDir)
 		}
 
 		// TODO:UC20: later the exact kind of bootloaders we expect here might change
@@ -98,27 +100,49 @@ func sealKeyToModeenv(key secboot.EncryptionKey, model *asserts.Model, bootWith 
 
 	pbc := toPredictableBootChains(append(runModeBootChains, recoveryBootChains...))
 
-	if secboot.IsFDEHelperEnabled() {
-		if err := fdeSealKeyHook(key, pbc, bootWith.UnpackedGadgetDir); err != nil {
+	roleToBlName := map[bootloader.Role]string{
+		bootloader.RoleRecovery: rbl.Name(),
+		bootloader.RoleRunMode:  bl.Name(),
+	}
+
+	// get model parameters from bootchains
+	modelParams, err := sealKeyModelParams(pbc, roleToBlName)
+	if err != nil {
+		return fmt.Errorf("cannot prepare for key sealing: %v", err)
+	}
+
+	sealKeyParams := &secboot.SealKeyParams{
+		ModelParams:        modelParams,
+		KeyFile:            filepath.Join(InitramfsEncryptionKeyDir, "ubuntu-data.sealed-key"),
+		TPMLockoutAuthFile: filepath.Join(InstallHostFDEDataDir, "tpm-lockout-auth"),
+	}
+
+	// finally, seal the key
+	if fdehelper.Enabled() {
+		logger.Noticef("seal using the external FDE helper")
+		fdeModelParams := make([]fdehelper.ModelParams, 0, len(sealKeyParams.ModelParams))
+		for _, mp := range sealKeyParams.ModelParams {
+			p := fdehelper.ModelParams{
+				Series:         mp.Model.Series(),
+				BrandID:        mp.Model.BrandID(),
+				Model:          mp.Model.Model(),
+				Grade:          mp.Model.Grade(),
+				SignKeyID:      mp.Model.SignKeyID(),
+				LoadChains:     fdeLoadChains(mp.EFILoadChains),
+				KernelCmdlines: mp.KernelCmdlines,
+			}
+			fdeModelParams = append(fdeModelParams, p)
+		}
+
+		params := &fdehelper.InitialProvisionParams{
+			Key:         base64.RawStdEncoding.EncodeToString(key[:]),
+			ModelParams: fdeModelParams,
+		}
+
+		if err := fdehelper.InitialProvision(params, bootWith.UnpackedGadgetDir); err != nil {
 			return err
 		}
 	} else {
-		roleToBlName := map[bootloader.Role]string{
-			bootloader.RoleRecovery: rbl.Name(),
-			bootloader.RoleRunMode:  bl.Name(),
-		}
-
-		// get model parameters from bootchains
-		modelParams, err := sealKeyModelParams(pbc, roleToBlName)
-		if err != nil {
-			return fmt.Errorf("cannot prepare for key sealing: %v", err)
-		}
-		sealKeyParams := &secboot.SealKeyParams{
-			ModelParams:        modelParams,
-			KeyFile:            filepath.Join(InitramfsEncryptionKeyDir, "ubuntu-data.sealed-key"),
-			TPMLockoutAuthFile: filepath.Join(InstallHostFDEDataDir, "tpm-lockout-auth"),
-		}
-		// finally, seal the key
 		if err := secbootSealKey(key, sealKeyParams); err != nil {
 			return fmt.Errorf("cannot seal the encryption key: %v", err)
 		}
@@ -213,26 +237,45 @@ func resealKeyToModeenv(rootdir string, model *asserts.Model, modeenv *Modeenv, 
 	pbcJSON, _ := json.Marshal(pbc)
 	logger.Debugf("resealing (%d) to boot chains: %s", nextCount, pbcJSON)
 
-	if secboot.IsFDEHelperEnabled() {
-		if err := fdeResealKeyHook(pbc); err != nil {
+	roleToBlName := map[bootloader.Role]string{
+		bootloader.RoleRecovery: rbl.Name(),
+		bootloader.RoleRunMode:  bl.Name(),
+	}
+
+	// get model parameters from bootchains
+	modelParams, err := sealKeyModelParams(pbc, roleToBlName)
+	if err != nil {
+		return fmt.Errorf("cannot prepare for key resealing: %v", err)
+	}
+
+	resealKeyParams := &secboot.ResealKeyParams{
+		ModelParams: modelParams,
+		KeyFile:     filepath.Join(InitramfsEncryptionKeyDir, "ubuntu-data.sealed-key"),
+	}
+
+	if fdehelper.Enabled() {
+		fdeModelParams := make([]fdehelper.ModelParams, 0, len(resealKeyParams.ModelParams))
+		for _, mp := range resealKeyParams.ModelParams {
+			p := fdehelper.ModelParams{
+				Series:         mp.Model.Series(),
+				BrandID:        mp.Model.BrandID(),
+				Model:          mp.Model.Model(),
+				Grade:          mp.Model.Grade(),
+				SignKeyID:      mp.Model.SignKeyID(),
+				LoadChains:     fdeLoadChains(mp.EFILoadChains),
+				KernelCmdlines: mp.KernelCmdlines,
+			}
+			fdeModelParams = append(fdeModelParams, p)
+		}
+
+		params := &fdehelper.UpdateParams{
+			ModelParams: fdeModelParams,
+		}
+
+		if err := fdehelper.Update(params); err != nil {
 			return err
 		}
 	} else {
-		roleToBlName := map[bootloader.Role]string{
-			bootloader.RoleRecovery: rbl.Name(),
-			bootloader.RoleRunMode:  bl.Name(),
-		}
-
-		// get model parameters from bootchains
-		modelParams, err := sealKeyModelParams(pbc, roleToBlName)
-		if err != nil {
-			return fmt.Errorf("cannot prepare for key resealing: %v", err)
-		}
-
-		resealKeyParams := &secboot.ResealKeyParams{
-			ModelParams: modelParams,
-			KeyFile:     filepath.Join(InitramfsEncryptionKeyDir, "ubuntu-data.sealed-key"),
-		}
 		if err := secbootResealKey(resealKeyParams); err != nil {
 			return fmt.Errorf("cannot reseal the encryption key: %v", err)
 		}
@@ -421,57 +464,21 @@ func isResealNeeded(pbc predictableBootChains, rootdir string, expectReseal bool
 	return true, c + 1, nil
 }
 
-type fdeInitialProvisionParams struct {
-	Key        string                `json:"key"`
-	BootChains predictableBootChains `json:"boot-chains"`
-}
-
-// fdeSealKeyHook is called on system install to initialize
-// the secure fde and seal the key.
-func fdeSealKeyHook(key secboot.EncryptionKey, pbc predictableBootChains, gadgetDir string) error {
-	kstr := base64.RawStdEncoding.EncodeToString(key[:])
-	params := fdeInitialProvisionParams{
-		Key:        kstr,
-		BootChains: pbc,
+// fdeLoadChains builds load chains for the external FDE helper based
+// on the secboot EFI load chains.
+func fdeLoadChains(elc []*secboot.LoadChain) []*fdehelper.LoadChain {
+	if elc == nil {
+		return nil
 	}
-
-	j, err := json.Marshal(params)
-	if err != nil {
-		return err
+	flc := make([]*fdehelper.LoadChain, 0, len(elc))
+	for _, e := range elc {
+		f := &fdehelper.LoadChain{
+			Path: e.Path,
+			Snap: e.Snap,
+			Role: e.Role,
+			Next: fdeLoadChains(e.Next),
+		}
+		flc = append(flc, f)
 	}
-
-	cmd := exec.Command(filepath.Join(gadgetDir, "fde-helper"), "--initial-provision")
-	cmd.Stdin = bytes.NewReader(j)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return osutil.OutputErr(out, err)
-	}
-
-	return nil
-}
-
-type fdeUpdateParams struct {
-	BootChains predictableBootChains `json:"boot-chains"`
-}
-
-// fdeResealKeyHook is called when there's a change in
-// the parameters the key is sealed to.
-func fdeResealKeyHook(pbc predictableBootChains) error {
-	params := fdeUpdateParams{
-		BootChains: pbc,
-	}
-
-	j, err := json.Marshal(params)
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.Command("/run/mnt/ubuntu-boot/fde-helper", "--update")
-	cmd.Stdin = bytes.NewReader(j)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return osutil.OutputErr(out, err)
-	}
-
-	return nil
+	return flc
 }

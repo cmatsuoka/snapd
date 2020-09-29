@@ -21,13 +21,10 @@
 package secboot
 
 import (
-	"bytes"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/canonical/go-tpm2"
@@ -37,6 +34,7 @@ import (
 	"github.com/snapcore/snapd/asserts"
 	"github.com/snapcore/snapd/bootloader"
 	"github.com/snapcore/snapd/bootloader/efi"
+	"github.com/snapcore/snapd/fdehelper"
 	"github.com/snapcore/snapd/logger"
 	"github.com/snapcore/snapd/osutil"
 	"github.com/snapcore/snapd/osutil/disks"
@@ -72,19 +70,14 @@ var (
 	isTPMEnabled = isTPMEnabledImpl
 )
 
-func IsFDEHelperEnabled() bool {
-	// XXX: enable this after checking if the helper should be used
-	return true
-}
-
 func isTPMEnabledImpl(tpm *sb.TPMConnection) bool {
 	return tpm.IsEnabled()
 }
 
 func CheckKeySealingSupported(gadgetInfo *snap.Info) error {
-	if IsFDEHelperEnabled() {
+	if fdehelper.Enabled() {
 		logger.Noticef("checking if secure FDE is supported...")
-		return fdeSupportedHook(gadgetInfo.MountDir())
+		return fdehelper.Supported(gadgetInfo.MountDir())
 	}
 
 	logger.Noticef("checking if secure boot is enabled...")
@@ -205,14 +198,19 @@ func MeasureSnapModelWhenPossible(findModel func() (*asserts.Model, error)) erro
 // device node is an unencrypted normal volume.
 func UnlockVolumeIfEncrypted(disk disks.Disk, name string, encryptionKeyDir string, lockKeysOnFinish bool) (string, bool, error) {
 	// XXX
-	if IsFDEHelperEnabled() {
+	if fdehelper.Enabled() {
 		partUUID, err := disk.FindMatchingPartitionUUID(name + "-enc")
 		if err != nil {
 			return "", false, err
 		}
 		encdev := filepath.Join("/dev/disk/by-partuuid", partUUID)
 		mapperName := name + "-" + randutilRandomKernelUUID()
-		if err := fdeUnlockVolumeHook(mapperName, encdev, lockKeysOnFinish); err != nil {
+		params := &fdehelper.UnlockVolumeParams{
+			VolumeName:       mapperName,
+			SourceDevicePath: encdev,
+			LockKeysOnFinish: lockKeysOnFinish,
+		}
+		if err := fdehelper.UnlockVolume(params); err != nil {
 			return "", false, err
 		}
 		return filepath.Join("/dev/mapper", mapperName), true, nil
@@ -564,40 +562,4 @@ func efiImageFromBootFile(b *bootloader.BootFile) (sb.EFIImage, error) {
 		Path:      b.Snap,
 		FileName:  b.Path,
 	}, nil
-}
-
-func fdeSupportedHook(gadgetDir string) error {
-	// this is used only during the installation process
-	out, err := exec.Command(filepath.Join(gadgetDir, "fde-helper"), "--supported").CombinedOutput()
-	if err != nil {
-		return osutil.OutputErr(out, err)
-	}
-	return nil
-}
-
-type fdeUnlockHookParams struct {
-	VolumeName       string `json:"volume-name"`
-	SourceDevicePath string `json:"source-device-path"`
-	LockKeysOnFinish bool   `json:"lock-keys-on-finish"`
-}
-
-func fdeUnlockVolumeHook(volumeName, sourceDevicePath string, lockKeysOnFinish bool) error {
-	params := fdeUnlockHookParams{
-		VolumeName:       volumeName,
-		SourceDevicePath: sourceDevicePath,
-		LockKeysOnFinish: lockKeysOnFinish,
-	}
-
-	j, err := json.Marshal(params)
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.Command("/run/mnt/ubuntu-boot/fde-helper", "--unlock")
-	cmd.Stdin = bytes.NewReader(j)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return osutil.OutputErr(out, err)
-	}
-	return nil
 }
