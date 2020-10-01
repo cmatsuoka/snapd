@@ -50,15 +50,15 @@ func Supported(gadgetDir string) error {
 	return nil
 }
 
-type UnlockVolumeParams struct {
+type UnlockParams struct {
 	VolumeName       string `json:"volume-name"`
 	SourceDevicePath string `json:"source-device-path"`
 	LockKeysOnFinish bool   `json:"lock-keys-on-finish"`
 }
 
-// UnlockVolume unseals the key and unlocks the encrypted volume
+// Unlock unseals the key and unlocks the encrypted volume
 // specified in params.
-func UnlockVolume(params *UnlockVolumeParams) error {
+func Unlock(params *UnlockParams) error {
 	j, err := json.Marshal(params)
 	if err != nil {
 		return err
@@ -79,9 +79,9 @@ func UnlockVolume(params *UnlockVolumeParams) error {
 
 type LoadChain struct {
 	Path string          `json:"path"`
-	Snap string          `json:"snap"`
+	Snap string          `json:"snap,omitempty"`
 	Role bootloader.Role `json:"role"`
-	Next []*LoadChain    `json:"next"`
+	Next []*LoadChain    `json:"next,omitempty"`
 }
 
 type ModelParams struct {

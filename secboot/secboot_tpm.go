@@ -205,12 +205,12 @@ func UnlockVolumeIfEncrypted(disk disks.Disk, name string, encryptionKeyDir stri
 		}
 		encdev := filepath.Join("/dev/disk/by-partuuid", partUUID)
 		mapperName := name + "-" + randutilRandomKernelUUID()
-		params := &fdehelper.UnlockVolumeParams{
+		params := &fdehelper.UnlockParams{
 			VolumeName:       mapperName,
 			SourceDevicePath: encdev,
 			LockKeysOnFinish: lockKeysOnFinish,
 		}
-		if err := fdehelper.UnlockVolume(params); err != nil {
+		if err := fdehelper.Unlock(params); err != nil {
 			return "", false, err
 		}
 		return filepath.Join("/dev/mapper", mapperName), true, nil
