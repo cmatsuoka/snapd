@@ -19,12 +19,6 @@
 			"revisionTime": "2020-04-16T00:17:14Z"
 		},
 		{
-			"checksumSHA1": "fGle5W3B2jSAsLeOQnRbGG7uyV8=",
-			"path": "github.com/canonical/go-tpm2/mu",
-			"revision": "8f372d7de1b07c887e388874555d48f9161feaed",
-			"revisionTime": "2020-08-24T11:54:14Z"
-		},
-		{
 			"checksumSHA1": "eDjzake0GpHm9kfTH7FMUWX8zVA=",
 			"path": "github.com/chrisccoulson/tcglog-parser",
 			"revision": "7b0f085a85398d368e10382a21a44ec2226c35b3",
@@ -116,40 +110,40 @@
 			"revisionTime": "2017-09-28T14:21:59Z"
 		},
 		{
-			"checksumSHA1": "PDNOnQtwFmoz6EsIQhlZdbkH4IY=",
+			"checksumSHA1": "PoNwB8XloNse3xwDj6BSooWaIro=",
 			"path": "github.com/snapcore/secboot",
-			"revision": "40263fb0e327e5fb62710c8e820a7c781ded2828",
-			"revisionTime": "2020-09-21T18:39:49Z"
+			"revision": "07a3454e7c3ed18ef8b3083a539354857b9bd97f",
+			"revisionTime": "2020-09-25T18:23:52Z"
 		},
 		{
 			"checksumSHA1": "c7jHLQSWFWbymTcFWZMQH0C5Wik=",
 			"path": "github.com/snapcore/secboot/internal/efi",
-			"revision": "40263fb0e327e5fb62710c8e820a7c781ded2828",
-			"revisionTime": "2020-09-21T18:39:49Z"
+			"revision": "07a3454e7c3ed18ef8b3083a539354857b9bd97f",
+			"revisionTime": "2020-09-25T18:23:52Z"
 		},
 		{
 			"checksumSHA1": "loFEiH6evGaDnDSlQgk3ugemkcU=",
 			"path": "github.com/snapcore/secboot/internal/pe1.14",
-			"revision": "40263fb0e327e5fb62710c8e820a7c781ded2828",
-			"revisionTime": "2020-09-21T18:39:49Z"
+			"revision": "07a3454e7c3ed18ef8b3083a539354857b9bd97f",
+			"revisionTime": "2020-09-25T18:23:52Z"
 		},
 		{
 			"checksumSHA1": "kDay47kq9OgDplpkrYw0/a8Z+YY=",
 			"path": "github.com/snapcore/secboot/internal/tcg",
-			"revision": "40263fb0e327e5fb62710c8e820a7c781ded2828",
-			"revisionTime": "2020-09-21T18:39:49Z"
+			"revision": "07a3454e7c3ed18ef8b3083a539354857b9bd97f",
+			"revisionTime": "2020-09-25T18:23:52Z"
 		},
 		{
 			"checksumSHA1": "PRS8ACUu14shrvAgb747Izc25ns=",
 			"path": "github.com/snapcore/secboot/internal/tcti",
-			"revision": "40263fb0e327e5fb62710c8e820a7c781ded2828",
-			"revisionTime": "2020-09-21T18:39:49Z"
+			"revision": "07a3454e7c3ed18ef8b3083a539354857b9bd97f",
+			"revisionTime": "2020-09-25T18:23:52Z"
 		},
 		{
 			"checksumSHA1": "TnfofdyojXYWOwdWCKMY5RCeI7s=",
 			"path": "github.com/snapcore/secboot/internal/truststore",
-			"revision": "40263fb0e327e5fb62710c8e820a7c781ded2828",
-			"revisionTime": "2020-09-21T18:39:49Z"
+			"revision": "07a3454e7c3ed18ef8b3083a539354857b9bd97f",
+			"revisionTime": "2020-09-25T18:23:52Z"
 		},
 		{
 			"checksumSHA1": "3AmEm18mKj8XxBuru/ix4OOpRkE=",
