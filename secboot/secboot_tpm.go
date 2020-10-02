@@ -299,8 +299,8 @@ func UnlockVolumeIfEncrypted(disk disks.Disk, name string, encryptionKeyDir stri
 // unlockEncryptedPartitionWithRecoveryKey prompts for the recovery key and use
 // it to open an encrypted device.
 func unlockEncryptedPartitionWithRecoveryKey(name, device string) error {
-	options := sb.ActivateWithRecoveryKeyOptions{
-		Tries: 3,
+	options := sb.ActivateVolumeOptions{
+		RecoveryKeyTries: 3,
 	}
 
 	if err := sbActivateVolumeWithRecoveryKey(name, device, nil, &options); err != nil {
@@ -314,10 +314,10 @@ func unlockEncryptedPartitionWithRecoveryKey(name, device string) error {
 // device. If activation with the sealed key fails, this function will attempt to
 // activate it with the fallback recovery key instead.
 func unlockEncryptedPartitionWithSealedKey(tpm *sb.TPMConnection, name, device, keyfile, pinfile string, lock bool) error {
-	options := sb.ActivateWithTPMSealedKeyOptions{
-		PINTries:            1,
-		RecoveryKeyTries:    3,
-		LockSealedKeyAccess: lock,
+	options := sb.ActivateVolumeOptions{
+		PassphraseTries:  1,
+		RecoveryKeyTries: 3,
+		LockSealedKeys:   lock,
 	}
 
 	// XXX: pinfile is currently not used
